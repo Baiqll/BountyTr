@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/edsrzf/mmap-go"
 
@@ -81,6 +82,32 @@ type Bugcrowd struct {
 
 type Bounty interface {
 	HackeroneTarget | BugcrowdTarget
+}
+
+type Task struct {
+	Name    string
+	Timeout time.Duration
+	fn      func()
+}
+
+func NewTask(name string, timeout time.Duration, fn func()) *Task {
+	return &Task{
+		Name:    name,
+		Timeout: timeout,
+		fn:      fn,
+	}
+}
+
+func (t *Task) Run() {
+	ticker := time.NewTicker(t.Timeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			t.fn()
+		}
+	}
 }
 
 func BountyTarget(url string) []byte {
@@ -204,13 +231,29 @@ func main() {
 	fmt.Println("[*] Starting tracker", "... ")
 
 	os.MkdirAll(source_path, os.ModePerm)
-	source_targets := read_file_to_map(filepath.Join(source_path, "domain.txt"))
 
-	new_hackerone_targets := hackerone(source_targets)
-	new_bugcrowd_targets := bugcrowd(source_targets)
+	// 启动定时任务
+	tasks := []*Task{
+		NewTask("tracker", time.Duration(cycle_time)*time.Minute, func() {
 
-	// 文件末尾追加新目标
-	save_targets_to_file(filepath.Join(source_path, "domain.txt"), append(new_hackerone_targets, new_bugcrowd_targets...))
+			// 读取源目标文件
+			source_targets := read_file_to_map(filepath.Join(source_path, "domain.txt"))
+
+			// 获取新增赏金目标
+			new_hackerone_targets := hackerone(source_targets)
+			new_bugcrowd_targets := bugcrowd(source_targets)
+
+			// 保存新增目标
+			save_targets_to_file(filepath.Join(source_path, "domain.txt"), append(new_hackerone_targets, new_bugcrowd_targets...))
+		}),
+	}
+
+	for _, task := range tasks {
+		go task.Run()
+	}
+
+	// 等待任务结束
+	select {}
 
 }
 
