@@ -227,7 +227,7 @@ func main() {
 	os.MkdirAll(source_path, os.ModePerm)
 
 	// 启动定时任务
-	if cycle_time >= 0 {
+	if cycle_time > 0 {
 
 		tasks := []*Task{
 			NewTask("tracker", time.Duration(cycle_time)*time.Minute, func() {
@@ -248,7 +248,7 @@ func run() {
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	fmt.Println("[*] Date: ", now)
+	fmt.Println("[*] Date:", now)
 
 	// 读取源目标文件
 	source_targets := read_file_to_map(filepath.Join(source_path, "domain.txt"))
