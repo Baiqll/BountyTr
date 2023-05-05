@@ -157,13 +157,10 @@ func bugcrowd(source_targets map[string]bool) (new_targets []string) {
 					}
 				}
 			}
-
 		}
-
 	}
 
 	return
-
 }
 
 func hackerone(source_targets map[string]bool) (new_targets []string) {
@@ -189,7 +186,6 @@ func hackerone(source_targets map[string]bool) (new_targets []string) {
 
 			// 只打印 Web 目标
 			if in(scope.AssetType, []string{"URL", "WILDCARD"}) {
-
 				for _, domain := range domain_match(scope.AssetIdentifier) {
 					if !source_targets[domain] {
 						fmt.Println(domain)
@@ -221,9 +217,7 @@ func main() {
 
 	var cycle_time int64
 
-	// now := time.Now().Format("2006-01-02 15:04:05")
-
-	flag.Int64Var(&cycle_time, "t", 30, "监控周期(分钟)")
+	flag.Int64Var(&cycle_time, "t", 0, "监控周期(分钟)")
 
 	// 解析命令行参数写入注册的flag里
 	flag.Parse()
@@ -233,37 +227,45 @@ func main() {
 	os.MkdirAll(source_path, os.ModePerm)
 
 	// 启动定时任务
-	tasks := []*Task{
-		NewTask("tracker", time.Duration(cycle_time)*time.Minute, func() {
+	if cycle_time >= 0 {
 
-			// 读取源目标文件
-			source_targets := read_file_to_map(filepath.Join(source_path, "domain.txt"))
-
-			// 获取新增赏金目标
-			new_hackerone_targets := hackerone(source_targets)
-			new_bugcrowd_targets := bugcrowd(source_targets)
-
-			// 保存新增目标
-			save_targets_to_file(filepath.Join(source_path, "domain.txt"), append(new_hackerone_targets, new_bugcrowd_targets...))
-		}),
+		tasks := []*Task{
+			NewTask("tracker", time.Duration(cycle_time)*time.Minute, func() {
+				run()
+			}),
+		}
+		for _, task := range tasks {
+			go task.Run()
+		}
+		// 等待任务结束
+		select {}
+	} else {
+		run()
 	}
+}
 
-	for _, task := range tasks {
-		go task.Run()
-	}
+func run() {
 
-	// 等待任务结束
-	select {}
+	now := time.Now().Format("2006-01-02 15:04:05")
+
+	fmt.Println("[*] Date: ", now)
+
+	// 读取源目标文件
+	source_targets := read_file_to_map(filepath.Join(source_path, "domain.txt"))
+
+	// 获取新增赏金目标
+	new_hackerone_targets := hackerone(source_targets)
+	new_bugcrowd_targets := bugcrowd(source_targets)
+
+	// new_goal reminder(append(new_hackerone_targets, new_bugcrowd_targets...))
+
+	// 保存新增目标
+	save_targets_to_file(filepath.Join(source_path, "domain.txt"), append(new_hackerone_targets, new_bugcrowd_targets...))
 
 }
 
-// // 目标对比
-// func compared_target(latest_targets []string) {
-// 	// 获取新资产目标，对比出新增资产
-
-// }
-
 func in(target string, str_array []string) bool {
+	// 判断字符串是否 存在于字符串数组内
 	sort.Strings(str_array)
 	index := sort.SearchStrings(str_array, target)
 	if index < len(str_array) && str_array[index] == target {
@@ -273,6 +275,7 @@ func in(target string, str_array []string) bool {
 }
 
 func domain_match(url string) []string {
+	// 提取域名
 
 	domain_rege := regexp.MustCompile(`[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`)
 
@@ -280,6 +283,8 @@ func domain_match(url string) []string {
 }
 
 func read_file_to_map(filename string) map[string]bool {
+	// 读取文件到 map
+
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatal(err)
@@ -318,6 +323,8 @@ func read_file_to_map(filename string) map[string]bool {
 
 func save_targets_to_file(filename string, targets []string) {
 
+	// 保存目标到文件内
+
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatal(err)
@@ -333,6 +340,7 @@ func save_targets_to_file(filename string, targets []string) {
 
 }
 func user_home_dir() string {
+	// 获取 $home 路径
 	usr, err := user.Current()
 	if err != nil {
 		fmt.Println("Could not get user home directory:", err)
