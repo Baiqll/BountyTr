@@ -1,4 +1,4 @@
-module github.com/arews-cn/bountytracker
+module github.com/arews-cn/bountytrk
 
 go 1.20
 
