@@ -11,10 +11,11 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/dlclark/regexp2"
 
 	"github.com/edsrzf/mmap-go"
 
@@ -23,6 +24,10 @@ import (
 
 var bugcrowdurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/bugcrowd_data.json"
 var hackeroneurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/hackerone_data.json"
+var blacklist = []string{
+	".gov",
+	".edu",
+}
 
 var source_path = filepath.Join(user_home_dir(), ".config/bountytr/")
 
@@ -151,7 +156,7 @@ func bugcrowd(source_targets map[string]bool) (new_targets []string) {
 			// 只打印 Web 目标
 			if in(scope.Type, []string{"api", "website"}) {
 				for _, domain := range domain_match(scope.Target) {
-					if !source_targets[domain] {
+					if !source_targets[domain] && !in(domain, new_targets) {
 						fmt.Println(domain)
 						new_targets = append(new_targets, domain)
 					}
@@ -187,7 +192,7 @@ func hackerone(source_targets map[string]bool) (new_targets []string) {
 			// 只打印 Web 目标
 			if in(scope.AssetType, []string{"URL", "WILDCARD"}) {
 				for _, domain := range domain_match(scope.AssetIdentifier) {
-					if !source_targets[domain] {
+					if !source_targets[domain] && !in(domain, new_targets) {
 						fmt.Println(domain)
 						new_targets = append(new_targets, domain)
 					}
@@ -264,6 +269,10 @@ func run() {
 
 }
 
+func new_goal_reminder(new_targets []string) {
+
+}
+
 func in(target string, str_array []string) bool {
 	// 判断字符串是否 存在于字符串数组内
 	sort.Strings(str_array)
@@ -277,9 +286,19 @@ func in(target string, str_array []string) bool {
 func domain_match(url string) []string {
 	// 提取域名
 
-	domain_rege := regexp.MustCompile(`[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`)
+	var black_pattern []string
+	for _, black := range blacklist {
 
-	return domain_rege.FindAllString(url, -1)
+		black_pattern = append(black_pattern, fmt.Sprintf(".*%s", black))
+	}
+
+	pattern := fmt.Sprintf(`^(?!%s)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
+
+	domain_rege := regexp2.MustCompile(pattern, 0)
+	// domain_rege := regexp.MustCompile(`^(?!.*gov|.*edu)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`)
+
+	// return dedupe_from_list(domain_rege.FindAllString(url, -1))
+	return dedupe_from_list(regexp2FindAllString(domain_rege, url))
 }
 
 func read_file_to_map(filename string) map[string]bool {
@@ -346,4 +365,30 @@ func user_home_dir() string {
 		fmt.Println("Could not get user home directory:", err)
 	}
 	return usr.HomeDir
+}
+
+func dedupe_from_list(source []string) []string {
+
+	var new_list []string
+
+	dedupe_set := make(map[string]bool)
+	for _, v := range source {
+		dedupe_set[v] = true
+	}
+
+	for k := range dedupe_set {
+		new_list = append(new_list, k)
+	}
+
+	return new_list
+}
+
+func regexp2FindAllString(re *regexp2.Regexp, s string) []string {
+	var matches []string
+	m, _ := re.FindStringMatch(s)
+	for m != nil {
+		matches = append(matches, m.String())
+		m, _ = re.FindNextMatch(m)
+	}
+	return matches
 }
