@@ -218,16 +218,20 @@ func main() {
    
 	Keep track of bounty targets
     `
-	fmt.Println(string(banner))
 
 	var cycle_time int64
+	var silent bool
 
 	flag.Int64Var(&cycle_time, "t", 0, "监控周期(分钟)")
+	flag.BoolVar(&silent, "silent", false, "是否静默状态")
 
 	// 解析命令行参数写入注册的flag里
 	flag.Parse()
 
-	fmt.Println("[*] Starting tracker", "... ")
+	if !silent {
+		fmt.Println(string(banner))
+		fmt.Println("[*] Starting tracker", "... ")
+	}
 
 	os.MkdirAll(source_path, os.ModePerm)
 
@@ -236,7 +240,7 @@ func main() {
 
 		tasks := []*Task{
 			NewTask("tracker", time.Duration(cycle_time)*time.Minute, func() {
-				run()
+				run(silent)
 			}),
 		}
 		for _, task := range tasks {
@@ -245,15 +249,17 @@ func main() {
 		// 等待任务结束
 		select {}
 	} else {
-		run()
+		run(silent)
 	}
 }
 
-func run() {
+func run(silent bool) {
 
-	now := time.Now().Format("2006-01-02 15:04:05")
+	if !silent {
+		now := time.Now().Format("2006-01-02 15:04:05")
 
-	fmt.Println("[*] Date:", now)
+		fmt.Println("[*] Date:", now)
+	}
 
 	// 读取源目标文件
 	source_targets := read_file_to_map(filepath.Join(source_path, "domain.txt"))
@@ -286,6 +292,7 @@ func in(target string, str_array []string) bool {
 func domain_match(url string) []string {
 	// 提取域名
 
+	// 黑名单正则
 	var black_pattern []string
 	for _, black := range blacklist {
 
