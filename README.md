@@ -3,7 +3,7 @@
 
 #### 安装
 ```shell
-   go install github.com/arews-cn/bountytr@latest
+   go install github.com/baiqll/bountytr@latest
 ```
 
 
