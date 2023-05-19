@@ -1,4 +1,4 @@
-module github.com/arews-cn/bountytr
+module github.com/baiqll/bountytr
 
 go 1.20
 
