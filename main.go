@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -30,8 +31,8 @@ var blacklist = []string{
 }
 
 var filterlist = []string{
-	"android",
-	"ios",
+	".android.",
+	".ios.",
 }
 
 var source_path = filepath.Join(user_home_dir(), ".config/bountytr/")
@@ -321,15 +322,15 @@ func domain_match(url string, filterlist []string) []string {
 	}
 
 	// 特殊过滤
-	black_pattern = append(black_pattern, filterlist...)
+	// black_pattern = append(black_pattern, filterlist...)
 
-	pattern := fmt.Sprintf(`^(?!%s)[a-zA-Z0-9\*][-a-zA-Z0-9\*]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
+	pattern := fmt.Sprintf(`(?!%s)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
 
 	domain_rege := regexp2.MustCompile(pattern, 0)
 	// domain_rege := regexp.MustCompile(`^(?!.*gov|.*edu)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`)
 
 	// return dedupe_from_list(domain_rege.FindAllString(url, -1))
-	return dedupe_from_list(regexp2FindAllString(domain_rege, url))
+	return dedupe_from_list(regexp2FindAllString(domain_rege, url), filterlist)
 }
 
 func read_file_to_map(filename string) map[string]bool {
@@ -398,7 +399,7 @@ func user_home_dir() string {
 	return usr.HomeDir
 }
 
-func dedupe_from_list(source []string) []string {
+func dedupe_from_list(source []string, filterlist []string) []string {
 
 	var new_list []string
 
@@ -408,7 +409,11 @@ func dedupe_from_list(source []string) []string {
 	}
 
 	for k := range dedupe_set {
-		new_list = append(new_list, k)
+
+		// 过滤特殊字符
+		if !regexp.MustCompile(strings.Join(filterlist, "|")).MatchString(k) {
+			new_list = append(new_list, k)
+		}
 	}
 
 	return new_list
