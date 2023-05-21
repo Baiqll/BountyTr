@@ -29,6 +29,11 @@ var blacklist = []string{
 	".edu",
 }
 
+var filterlist = []string{
+	"android",
+	"ios",
+}
+
 var source_path = filepath.Join(user_home_dir(), ".config/bountytr/")
 
 type HackeroneScope struct {
@@ -155,7 +160,7 @@ func bugcrowd(source_targets map[string]bool) (new_targets []string) {
 
 			// 只打印 Web 目标
 			if in(scope.Type, []string{"api", "website"}) {
-				for _, domain := range domain_match(scope.Target) {
+				for _, domain := range domain_match(scope.Target, []string{}) {
 					if !source_targets[domain] && !in(domain, new_targets) {
 						fmt.Println(domain)
 						new_targets = append(new_targets, domain)
@@ -191,7 +196,23 @@ func hackerone(source_targets map[string]bool) (new_targets []string) {
 
 			// 只打印 Web 目标
 			if in(scope.AssetType, []string{"URL", "WILDCARD"}) {
-				for _, domain := range domain_match(scope.AssetIdentifier) {
+				for _, domain := range domain_match(scope.AssetIdentifier, []string{}) {
+					if !source_targets[domain] && !in(domain, new_targets) {
+						fmt.Println(domain)
+						new_targets = append(new_targets, domain)
+					}
+				}
+			}
+
+			// 其他
+			if in(scope.AssetType, []string{"OTHER"}) {
+				for _, domain := range domain_match(scope.AssetIdentifier, filterlist) {
+					if !source_targets[domain] && !in(domain, new_targets) {
+						fmt.Println(domain)
+						new_targets = append(new_targets, domain)
+					}
+				}
+				for _, domain := range domain_match(scope.Instruction, filterlist) {
 					if !source_targets[domain] && !in(domain, new_targets) {
 						fmt.Println(domain)
 						new_targets = append(new_targets, domain)
@@ -289,7 +310,7 @@ func in(target string, str_array []string) bool {
 	return false
 }
 
-func domain_match(url string) []string {
+func domain_match(url string, filterlist []string) []string {
 	// 提取域名
 
 	// 黑名单正则
@@ -299,7 +320,10 @@ func domain_match(url string) []string {
 		black_pattern = append(black_pattern, fmt.Sprintf(".*%s", black))
 	}
 
-	pattern := fmt.Sprintf(`^(?!%s)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
+	// 特殊过滤
+	black_pattern = append(black_pattern, filterlist...)
+
+	pattern := fmt.Sprintf(`^(?!%s)[a-zA-Z0-9\*][-a-zA-Z0-9\*]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
 
 	domain_rege := regexp2.MustCompile(pattern, 0)
 	// domain_rege := regexp.MustCompile(`^(?!.*gov|.*edu)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`)
