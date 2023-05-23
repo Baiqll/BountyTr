@@ -323,7 +323,6 @@ func domain_match(url string, filterlist []string) []string {
 
 	// 特殊过滤
 	// black_pattern = append(black_pattern, filterlist...)
-
 	pattern := fmt.Sprintf(`(?!%s)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
 
 	domain_rege := regexp2.MustCompile(pattern, 0)
