@@ -28,11 +28,14 @@ var hackeroneurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-da
 var blacklist = []string{
 	".gov",
 	".edu",
+	".json",
 }
 
 var filterlist = []string{
-	".android.",
-	".ios.",
+	`.android.`,
+	`.ios.`,
+	`^com.`,
+	`^[0-9.]+$`,
 }
 
 var source_path = filepath.Join(user_home_dir(), ".config/bountytr/")
@@ -323,7 +326,6 @@ func domain_match(url string, filterlist []string) []string {
 
 	// 特殊过滤
 	// black_pattern = append(black_pattern, filterlist...)
-
 	pattern := fmt.Sprintf(`(?!%s)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
 
 	domain_rege := regexp2.MustCompile(pattern, 0)
