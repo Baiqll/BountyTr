@@ -8,10 +8,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -20,6 +20,7 @@ import (
 
 	"github.com/edsrzf/mmap-go"
 
+	"github.com/projectdiscovery/dnsx/libs/dnsx"
 	"golang.org/x/sys/unix"
 )
 
@@ -29,13 +30,7 @@ var blacklist = []string{
 	".gov",
 	".edu",
 	".json",
-}
-
-var filterlist = []string{
-	`.android.`,
-	`.ios.`,
-	`^com.`,
-	`^[0-9.]+$`,
+	".[0-9.]+$",
 }
 
 var source_path = filepath.Join(user_home_dir(), ".config/bountytr/")
@@ -141,7 +136,7 @@ func BountyTarget(url string) []byte {
 	return body
 
 }
-func bugcrowd(source_targets map[string]bool) (new_targets []string) {
+func bugcrowd(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string) {
 
 	var body = BountyTarget(bugcrowdurl)
 
@@ -164,10 +159,14 @@ func bugcrowd(source_targets map[string]bool) (new_targets []string) {
 
 			// 只打印 Web 目标
 			if in(scope.Type, []string{"api", "website"}) {
-				for _, domain := range domain_match(scope.Target, []string{}) {
-					if !source_targets[domain] && !in(domain, new_targets) {
-						fmt.Println(domain)
-						new_targets = append(new_targets, domain)
+				for _, domain := range domain_match(scope.Target) {
+					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
+						if domain_valid(domain) && !strings.Contains(scope.Target, `\*`) {
+							fmt.Println(domain)
+							new_targets = append(new_targets, domain)
+						} else {
+							error_targets = append(error_targets, domain)
+						}
 					}
 				}
 			}
@@ -177,7 +176,7 @@ func bugcrowd(source_targets map[string]bool) (new_targets []string) {
 	return
 }
 
-func hackerone(source_targets map[string]bool) (new_targets []string) {
+func hackerone(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string) {
 
 	var body = BountyTarget(hackeroneurl)
 
@@ -200,26 +199,38 @@ func hackerone(source_targets map[string]bool) (new_targets []string) {
 
 			// 只打印 Web 目标
 			if in(scope.AssetType, []string{"URL", "WILDCARD"}) {
-				for _, domain := range domain_match(scope.AssetIdentifier, []string{}) {
-					if !source_targets[domain] && !in(domain, new_targets) {
-						fmt.Println(domain)
-						new_targets = append(new_targets, domain)
+				for _, domain := range domain_match(scope.AssetIdentifier) {
+					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
+						if domain_valid(domain) && !strings.Contains(scope.AssetIdentifier, `\*`) {
+							fmt.Println(domain)
+							new_targets = append(new_targets, domain)
+						} else {
+							error_targets = append(error_targets, domain)
+						}
 					}
 				}
 			}
 
 			// 其他
 			if in(scope.AssetType, []string{"OTHER"}) {
-				for _, domain := range domain_match(scope.AssetIdentifier, filterlist) {
-					if !source_targets[domain] && !in(domain, new_targets) {
-						fmt.Println(domain)
-						new_targets = append(new_targets, domain)
+				for _, domain := range domain_match(scope.AssetIdentifier) {
+					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
+						if !domain_valid(domain) && !strings.Contains(scope.AssetIdentifier, `\*`) {
+							fmt.Println(domain)
+							new_targets = append(new_targets, domain)
+						} else {
+							error_targets = append(error_targets, domain)
+						}
 					}
 				}
-				for _, domain := range domain_match(scope.Instruction, filterlist) {
-					if !source_targets[domain] && !in(domain, new_targets) {
-						fmt.Println(domain)
-						new_targets = append(new_targets, domain)
+				for _, domain := range domain_match(scope.Instruction) {
+					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
+						if domain_valid(domain) && !strings.Contains(scope.Instruction, `\*`) {
+							fmt.Println(domain)
+							new_targets = append(new_targets, domain)
+						} else {
+							error_targets = append(error_targets, domain)
+						}
 					}
 				}
 			}
@@ -288,15 +299,18 @@ func run(silent bool) {
 
 	// 读取源目标文件
 	source_targets := read_file_to_map(filepath.Join(source_path, "domain.txt"))
+	fail_targets := read_file_to_map(filepath.Join(source_path, "faildomain.txt"))
 
 	// 获取新增赏金目标
-	new_hackerone_targets := hackerone(source_targets)
-	new_bugcrowd_targets := bugcrowd(source_targets)
+	new_hackerone_fail_targets, new_hackerone_targets := hackerone(source_targets, fail_targets)
+	new_bugcrowd_fail_targets, new_bugcrowd_targets := bugcrowd(source_targets, fail_targets)
 
 	// new_goal reminder(append(new_hackerone_targets, new_bugcrowd_targets...))
 
 	// 保存新增目标
 	save_targets_to_file(filepath.Join(source_path, "domain.txt"), append(new_hackerone_targets, new_bugcrowd_targets...))
+
+	save_targets_to_file(filepath.Join(source_path, "faildomain.txt"), append(new_hackerone_fail_targets, new_bugcrowd_fail_targets...))
 
 }
 
@@ -314,7 +328,7 @@ func in(target string, str_array []string) bool {
 	return false
 }
 
-func domain_match(url string, filterlist []string) []string {
+func domain_match(url string) []string {
 	// 提取域名
 
 	// 黑名单正则
@@ -332,7 +346,7 @@ func domain_match(url string, filterlist []string) []string {
 	// domain_rege := regexp.MustCompile(`^(?!.*gov|.*edu)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`)
 
 	// return dedupe_from_list(domain_rege.FindAllString(url, -1))
-	return dedupe_from_list(regexp2FindAllString(domain_rege, url), filterlist)
+	return dedupe_from_list(regexp2FindAllString(domain_rege, url))
 }
 
 func read_file_to_map(filename string) map[string]bool {
@@ -401,7 +415,7 @@ func user_home_dir() string {
 	return usr.HomeDir
 }
 
-func dedupe_from_list(source []string, filterlist []string) []string {
+func dedupe_from_list(source []string) []string {
 
 	var new_list []string
 
@@ -412,10 +426,7 @@ func dedupe_from_list(source []string, filterlist []string) []string {
 
 	for k := range dedupe_set {
 
-		// 过滤特殊字符
-		if !regexp.MustCompile(strings.Join(filterlist, "|")).MatchString(k) {
-			new_list = append(new_list, k)
-		}
+		new_list = append(new_list, k)
 	}
 
 	return new_list
@@ -429,4 +440,23 @@ func regexp2FindAllString(re *regexp2.Regexp, s string) []string {
 		m, _ = re.FindNextMatch(m)
 	}
 	return matches
+}
+
+func domain_valid(domain string) bool {
+	// 检查domain是否符合url格式
+	_, err := url.Parse("http://" + domain)
+	if err != nil {
+		return false
+	}
+
+	dnsClient, _ := dnsx.New(dnsx.DefaultOptions)
+
+	// DNS A question and returns corresponding IPs
+	result, _ := dnsClient.Lookup(domain)
+
+	if len(result) == 0 {
+		return false
+	}
+
+	return true
 }
