@@ -20,12 +20,16 @@ import (
 
 	"github.com/edsrzf/mmap-go"
 
+	"github.com/baiqll/bountytr/src/models"
+
 	"github.com/projectdiscovery/dnsx/libs/dnsx"
 	"golang.org/x/sys/unix"
 )
 
 var bugcrowdurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/bugcrowd_data.json"
 var hackeroneurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/hackerone_data.json"
+var intigritiurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/intigriti_data.json"
+
 var blacklist = []string{
 	".gov",
 	".edu",
@@ -35,62 +39,8 @@ var blacklist = []string{
 
 var source_path = filepath.Join(user_home_dir(), ".config/bountytr/")
 
-type HackeroneScope struct {
-	AssetIdentifier           string `json:"asset_identifier"`
-	AssetType                 string `json:"asset_type"`
-	AvailabilityRequirement   string `json:"availability_requirement"`
-	ConfdentialityRequirement string `json:"confidentiality_requirement"`
-	EligibleForBounty         bool   `json:"eligible_for_bounty"`
-	EligibleForSubmission     bool   `json:"eligible_for_submission"`
-	Instruction               string `json:"instruction"`
-	IntegrityRequirement      string `json:"integrity_requirement"`
-	MaxSeverity               string `json:"max_severity"`
-}
-
-type HackeroneTarget struct {
-	InScope    []HackeroneScope `json:"in_scope"`
-	OutOfScope []HackeroneScope `json:"out_of_scope"`
-}
-
-type Hackerone struct {
-	AllowsBountySplitting bool `json:"allows_bounty_splitting"`
-	// AverageTimeToBountyAwarded        string          `json:"average_time_to_bounty_awarded"`
-	AverageTimeToFirstProgramResponse float32 `json:"average_time_to_first_program_response"`
-	// AverageTimeToReportResolved       string          `json:"average_time_to_report_resolved"`
-	Handle                       string          `json:"phandle"`
-	ManagedProgram               bool            `json:"managed_program"`
-	OffersBounties               bool            `json:"offers_bounties"`
-	OffersSwag                   bool            `json:"offers_swag"`
-	Name                         string          `json:"name"`
-	ResponseEfficiencyPercentage int64           `json:"response_efficiency_percentage"`
-	SubmissionState              string          `json:"submission_state"`
-	Url                          string          `json:"url"`
-	Website                      string          `json:"website"`
-	Targets                      HackeroneTarget `json:"targets"`
-}
-
-type BugcrowdScope struct {
-	Type   string `json:"type"`
-	Target string `json:"target"`
-}
-
-type BugcrowdTarget struct {
-	InScope    []BugcrowdScope `json:"in_scope"`
-	OutOfScope []BugcrowdScope `json:"out_of_scope"`
-}
-
-type Bugcrowd struct {
-	Name              string         `json:"name"`
-	Url               string         `json:"url"`
-	AllowsDisclosure  bool           `json:"allows_disclosure"`
-	ManagedByBugcrowd bool           `json:"managed_by_bugcrowd"`
-	SafeHarbor        string         `json:"safe_harbor"`
-	MaxPayout         int64          `json:"max_payout"`
-	Targets           BugcrowdTarget `json:"targets"`
-}
-
 type Bounty interface {
-	HackeroneTarget | BugcrowdTarget
+	models.HackeroneTarget | models.BugcrowdTarget | models.IntigritiTarget
 }
 
 type Task struct {
@@ -136,12 +86,13 @@ func BountyTarget(url string) []byte {
 	return body
 
 }
+
 func bugcrowd(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string) {
 
 	var body = BountyTarget(bugcrowdurl)
 
 	// 解析JSON数据
-	var targets []Bugcrowd
+	var targets []models.Bugcrowd
 	err := json.Unmarshal(body, &targets)
 	if err != nil {
 		fmt.Println(err)
@@ -181,7 +132,7 @@ func hackerone(source_targets map[string]bool, fail_targets map[string]bool) (er
 	var body = BountyTarget(hackeroneurl)
 
 	// 解析JSON数据
-	var targets []Hackerone
+	var targets []models.Hackerone
 	err := json.Unmarshal(body, &targets)
 	if err != nil {
 		fmt.Println(err)
@@ -226,6 +177,46 @@ func hackerone(source_targets map[string]bool, fail_targets map[string]bool) (er
 				for _, domain := range domain_match(scope.Instruction) {
 					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
 						if domain_valid(domain) && !strings.Contains(scope.Instruction, `\*`) {
+							fmt.Println(domain)
+							new_targets = append(new_targets, domain)
+						} else {
+							error_targets = append(error_targets, domain)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return
+}
+
+func intigriti(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string) {
+
+	var body = BountyTarget(intigritiurl)
+
+	// 解析JSON数据
+	var targets []models.Intigriti
+	err := json.Unmarshal(body, &targets)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	for _, target := range targets {
+
+		// 判断是否有赏金
+		if target.MaxBounty.Value <= 0 {
+			continue
+		}
+
+		for _, scope := range target.Targets.InScope {
+
+			// 只打印 Web 目标
+			if in(scope.Type, []string{"url"}) {
+				for _, domain := range domain_match(scope.Endpoint) {
+					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
+						if domain_valid(domain) && !strings.Contains(scope.Endpoint, `\*`) {
 							fmt.Println(domain)
 							new_targets = append(new_targets, domain)
 						} else {
@@ -304,13 +295,12 @@ func run(silent bool) {
 	// 获取新增赏金目标
 	new_hackerone_fail_targets, new_hackerone_targets := hackerone(source_targets, fail_targets)
 	new_bugcrowd_fail_targets, new_bugcrowd_targets := bugcrowd(source_targets, fail_targets)
-
-	// new_goal reminder(append(new_hackerone_targets, new_bugcrowd_targets...))
+	new_intigriti_fail_targets, new_intigriti_targets := intigriti(source_targets, fail_targets)
 
 	// 保存新增目标
-	save_targets_to_file(filepath.Join(source_path, "domain.txt"), append(new_hackerone_targets, new_bugcrowd_targets...))
+	save_targets_to_file(filepath.Join(source_path, "domain.txt"), append(append(new_hackerone_targets, new_bugcrowd_targets...), new_intigriti_targets...))
 
-	save_targets_to_file(filepath.Join(source_path, "faildomain.txt"), append(new_hackerone_fail_targets, new_bugcrowd_fail_targets...))
+	save_targets_to_file(filepath.Join(source_path, "faildomain.txt"), append(append(new_hackerone_fail_targets, new_bugcrowd_fail_targets...), new_intigriti_fail_targets...))
 
 }
 
@@ -416,7 +406,7 @@ func user_home_dir() string {
 }
 
 func dedupe_from_list(source []string) []string {
-
+	// 列表去重
 	var new_list []string
 
 	dedupe_set := make(map[string]bool)
@@ -433,6 +423,7 @@ func dedupe_from_list(source []string) []string {
 }
 
 func regexp2FindAllString(re *regexp2.Regexp, s string) []string {
+	// 正则匹配提取
 	var matches []string
 	m, _ := re.FindStringMatch(s)
 	for m != nil {
@@ -449,9 +440,10 @@ func domain_valid(domain string) bool {
 		return false
 	}
 
+	// DNS 查询
 	dnsClient, _ := dnsx.New(dnsx.DefaultOptions)
 
-	// DNS A question and returns corresponding IPs
+	// DNS 查询 A 记录
 	result, _ := dnsClient.Lookup(domain)
 
 	if len(result) == 0 {
