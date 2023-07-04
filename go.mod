@@ -7,6 +7,7 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/projectdiscovery/dnsx v1.1.4
 	golang.org/x/sys v0.8.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -29,5 +30,4 @@ require (
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/text v0.9.0 // indirect
 	golang.org/x/tools v0.8.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -1,43 +1,26 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
-	"net/url"
 	"os"
-	"os/user"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/dlclark/regexp2"
-
-	"github.com/edsrzf/mmap-go"
-
+	"github.com/baiqll/bountytr/src/lib"
 	"github.com/baiqll/bountytr/src/models"
-
-	"github.com/projectdiscovery/dnsx/libs/dnsx"
-	"golang.org/x/sys/unix"
+	"github.com/baiqll/bountytr/src/notify"
 )
 
-var bugcrowdurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/bugcrowd_data.json"
-var hackeroneurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/hackerone_data.json"
-var intigritiurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/intigriti_data.json"
+// var bugcrowdurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/bugcrowd_data.json"
+// var hackeroneurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/hackerone_data.json"
+// var intigritiurl = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/intigriti_data.json"
 
-var blacklist = []string{
-	".gov",
-	".edu",
-	".json",
-	".[0-9.]+$",
-}
-
-var source_path = filepath.Join(user_home_dir(), ".config/bountytr/")
+var source_path = filepath.Join(lib.HomeDir(), ".config/bountytr/")
 
 type Bounty interface {
 	models.HackeroneTarget | models.BugcrowdTarget | models.IntigritiTarget
@@ -69,6 +52,24 @@ func (t *Task) Run() {
 	}
 }
 
+type Bountry struct {
+	BugcrowdUrl  string
+	HackeroneUrl string
+	IntigritiUrl string
+	DingTalk     lib.DingTalk
+}
+
+func NewBountry(source_path string) *Bountry {
+
+	config := lib.GetConfig(source_path)
+	return &Bountry{
+		HackeroneUrl: config.HackerOne.Url,
+		BugcrowdUrl:  config.Bugcrowd.Url,
+		IntigritiUrl: config.Intigriti.Url,
+		DingTalk:     config.DingTalk,
+	}
+}
+
 func BountyTarget(url string) []byte {
 
 	// 请求JSON数据
@@ -87,9 +88,9 @@ func BountyTarget(url string) []byte {
 
 }
 
-func bugcrowd(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string) {
+func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string, new_bounty_url []string) {
 
-	var body = BountyTarget(bugcrowdurl)
+	var body = BountyTarget(b.BugcrowdUrl)
 
 	// 解析JSON数据
 	var targets []models.Bugcrowd
@@ -109,12 +110,13 @@ func bugcrowd(source_targets map[string]bool, fail_targets map[string]bool) (err
 		for _, scope := range target.Targets.InScope {
 
 			// 只打印 Web 目标
-			if in(scope.Type, []string{"api", "website"}) {
-				for _, domain := range domain_match(scope.Target) {
-					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
-						if domain_valid(domain) && !strings.Contains(scope.Target, `\*`) {
+			if lib.In(scope.Type, []string{"api", "website"}) {
+				for _, domain := range lib.DomainMatch(scope.Target) {
+					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+						if lib.DomainValid(domain) && !strings.Contains(scope.Target, `\*`) {
 							fmt.Println(domain)
 							new_targets = append(new_targets, domain)
+							new_bounty_url = append(new_bounty_url, target.Url)
 						} else {
 							error_targets = append(error_targets, domain)
 						}
@@ -127,9 +129,9 @@ func bugcrowd(source_targets map[string]bool, fail_targets map[string]bool) (err
 	return
 }
 
-func hackerone(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string) {
+func (b Bountry) hackerone(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string, new_bounty_url []string) {
 
-	var body = BountyTarget(hackeroneurl)
+	var body = BountyTarget(b.HackeroneUrl)
 
 	// 解析JSON数据
 	var targets []models.Hackerone
@@ -149,12 +151,13 @@ func hackerone(source_targets map[string]bool, fail_targets map[string]bool) (er
 		for _, scope := range target.Targets.InScope {
 
 			// 只打印 Web 目标
-			if in(scope.AssetType, []string{"URL", "WILDCARD"}) {
-				for _, domain := range domain_match(scope.AssetIdentifier) {
-					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
-						if domain_valid(domain) && !strings.Contains(scope.AssetIdentifier, `\*`) {
+			if lib.In(scope.AssetType, []string{"URL", "WILDCARD"}) {
+				for _, domain := range lib.DomainMatch(scope.AssetIdentifier) {
+					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+						if lib.DomainValid(domain) && !strings.Contains(scope.AssetIdentifier, `\*`) {
 							fmt.Println(domain)
 							new_targets = append(new_targets, domain)
+							new_bounty_url = append(new_bounty_url, target.Url)
 						} else {
 							error_targets = append(error_targets, domain)
 						}
@@ -163,22 +166,24 @@ func hackerone(source_targets map[string]bool, fail_targets map[string]bool) (er
 			}
 
 			// 其他
-			if in(scope.AssetType, []string{"OTHER"}) {
-				for _, domain := range domain_match(scope.AssetIdentifier) {
-					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
-						if !domain_valid(domain) && !strings.Contains(scope.AssetIdentifier, `\*`) {
+			if lib.In(scope.AssetType, []string{"OTHER"}) {
+				for _, domain := range lib.DomainMatch(scope.AssetIdentifier) {
+					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+						if !lib.DomainValid(domain) && !strings.Contains(scope.AssetIdentifier, `\*`) {
 							fmt.Println(domain)
 							new_targets = append(new_targets, domain)
+							new_bounty_url = append(new_bounty_url, target.Url)
 						} else {
 							error_targets = append(error_targets, domain)
 						}
 					}
 				}
-				for _, domain := range domain_match(scope.Instruction) {
-					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
-						if domain_valid(domain) && !strings.Contains(scope.Instruction, `\*`) {
+				for _, domain := range lib.DomainMatch(scope.Instruction) {
+					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+						if lib.DomainValid(domain) && !strings.Contains(scope.Instruction, `\*`) {
 							fmt.Println(domain)
 							new_targets = append(new_targets, domain)
+							new_bounty_url = append(new_bounty_url, target.Url)
 						} else {
 							error_targets = append(error_targets, domain)
 						}
@@ -191,9 +196,9 @@ func hackerone(source_targets map[string]bool, fail_targets map[string]bool) (er
 	return
 }
 
-func intigriti(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string) {
+func (b Bountry) intigriti(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string, new_bounty_url []string) {
 
-	var body = BountyTarget(intigritiurl)
+	var body = BountyTarget(b.IntigritiUrl)
 
 	// 解析JSON数据
 	var targets []models.Intigriti
@@ -213,12 +218,13 @@ func intigriti(source_targets map[string]bool, fail_targets map[string]bool) (er
 		for _, scope := range target.Targets.InScope {
 
 			// 只打印 Web 目标
-			if in(scope.Type, []string{"url"}) {
-				for _, domain := range domain_match(scope.Endpoint) {
-					if !source_targets[domain] && !in(domain, new_targets) && !fail_targets[domain] {
-						if domain_valid(domain) && !strings.Contains(scope.Endpoint, `\*`) {
+			if lib.In(scope.Type, []string{"url"}) {
+				for _, domain := range lib.DomainMatch(scope.Endpoint) {
+					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+						if lib.DomainValid(domain) && !strings.Contains(scope.Endpoint, `\*`) {
 							fmt.Println(domain)
 							new_targets = append(new_targets, domain)
+							new_bounty_url = append(new_bounty_url, target.Url)
 						} else {
 							error_targets = append(error_targets, domain)
 						}
@@ -287,168 +293,62 @@ func run(silent bool) {
 
 		fmt.Println("[*] Date:", now)
 	}
+	// init config
+	bountry := NewBountry(source_path)
 
 	// 读取源目标文件
-	source_targets := read_file_to_map(filepath.Join(source_path, "domain.txt"))
-	fail_targets := read_file_to_map(filepath.Join(source_path, "faildomain.txt"))
+	source_targets := lib.ReadFileToMap(filepath.Join(source_path, "domain.txt"))
+	fail_targets := lib.ReadFileToMap(filepath.Join(source_path, "faildomain.txt"))
+
+	//
 
 	// 获取新增赏金目标
-	new_hackerone_fail_targets, new_hackerone_targets := hackerone(source_targets, fail_targets)
-	new_bugcrowd_fail_targets, new_bugcrowd_targets := bugcrowd(source_targets, fail_targets)
-	new_intigriti_fail_targets, new_intigriti_targets := intigriti(source_targets, fail_targets)
+	new_hackerone_fail_targets, new_hackerone_targets, new_hackerone_url := bountry.hackerone(source_targets, fail_targets)
+	new_bugcrowd_fail_targets, new_bugcrowd_targets, new_bugcrowd_url := bountry.bugcrowd(source_targets, fail_targets)
+	new_intigriti_fail_targets, new_intigriti_targets, new_intigriti_url := bountry.intigriti(source_targets, fail_targets)
+
+	var new_targets = append(append(new_hackerone_targets, new_bugcrowd_targets...), new_intigriti_targets...)
+	var new_fail_targets = append(append(new_hackerone_fail_targets, new_bugcrowd_fail_targets...), new_intigriti_fail_targets...)
 
 	// 保存新增目标
-	save_targets_to_file(filepath.Join(source_path, "domain.txt"), append(append(new_hackerone_targets, new_bugcrowd_targets...), new_intigriti_targets...))
+	lib.SaveTargetsToFile(filepath.Join(source_path, "domain.txt"), new_targets)
 
-	save_targets_to_file(filepath.Join(source_path, "faildomain.txt"), append(append(new_hackerone_fail_targets, new_bugcrowd_fail_targets...), new_intigriti_fail_targets...))
+	lib.SaveTargetsToFile(filepath.Join(source_path, "faildomain.txt"), new_fail_targets)
+
+	// 发送通知信息
+	var msg_content = notify.BountyContent{
+		Hackerone: notify.MessageContent{
+			Urls:    new_hackerone_url,
+			Targets: new_hackerone_targets,
+		},
+		Bugcrowd: notify.MessageContent{
+			Urls:    new_bugcrowd_url,
+			Targets: new_bugcrowd_targets,
+		},
+		Intigriti: notify.MessageContent{
+			Urls:    new_intigriti_url,
+			Targets: new_intigriti_targets,
+		},
+	}
+
+	bountry.SendDingtalk(msg_content)
 
 }
 
-func new_goal_reminder(new_targets []string) {
+func (bountry Bountry) SendDingtalk(content notify.BountyContent) {
 
-}
+	var msg_content = notify.TargetMarkdown("Hackerone", content.Hackerone) +
+		notify.TargetMarkdown("Intigriti", content.Intigriti)
 
-func in(target string, str_array []string) bool {
-	// 判断字符串是否 存在于字符串数组内
-	sort.Strings(str_array)
-	index := sort.SearchStrings(str_array, target)
-	if index < len(str_array) && str_array[index] == target {
-		return true
-	}
-	return false
-}
-
-func domain_match(url string) []string {
-	// 提取域名
-
-	// 黑名单正则
-	var black_pattern []string
-	for _, black := range blacklist {
-
-		black_pattern = append(black_pattern, fmt.Sprintf(".*%s", black))
+	if msg_content == "" {
+		return
 	}
 
-	// 特殊过滤
-	// black_pattern = append(black_pattern, filterlist...)
-	pattern := fmt.Sprintf(`(?!%s)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
+	var receiver notify.Robot
+	receiver.AppKey = bountry.DingTalk.AppKey
+	receiver.AppSecret = bountry.DingTalk.AppSecret
+	webhookurl := receiver.Signature()
+	params := receiver.SendMarkdown("Bountytr 资产监控", msg_content, []string{}, []string{}, false)
 
-	domain_rege := regexp2.MustCompile(pattern, 0)
-	// domain_rege := regexp.MustCompile(`^(?!.*gov|.*edu)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`)
-
-	// return dedupe_from_list(domain_rege.FindAllString(url, -1))
-	return dedupe_from_list(regexp2FindAllString(domain_rege, url))
-}
-
-func read_file_to_map(filename string) map[string]bool {
-	// 读取文件到 map
-
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		log.Fatal(err)
-	}
-	size := info.Size()
-
-	if size == 0 {
-		if _, err := file.WriteString("\n"); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	hash := make(map[string]bool)
-	reader := bufio.NewReader(file)
-	mm, err := mmap.Map(file, unix.PROT_READ, 0)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer mm.Unmap()
-
-	for i := 0; int64(i) < size; i++ {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		hash[strings.Replace(line, "\n", "", -1)] = true
-	}
-	return hash
-}
-
-func save_targets_to_file(filename string, targets []string) {
-
-	// 保存目标到文件内
-
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	writer := bufio.NewWriter(file)
-	for _, target := range targets {
-		writer.WriteString(target + "\n")
-	}
-	writer.Flush()
-	file.Sync()
-
-}
-func user_home_dir() string {
-	// 获取 $home 路径
-	usr, err := user.Current()
-	if err != nil {
-		fmt.Println("Could not get user home directory:", err)
-	}
-	return usr.HomeDir
-}
-
-func dedupe_from_list(source []string) []string {
-	// 列表去重
-	var new_list []string
-
-	dedupe_set := make(map[string]bool)
-	for _, v := range source {
-		dedupe_set[v] = true
-	}
-
-	for k := range dedupe_set {
-
-		new_list = append(new_list, k)
-	}
-
-	return new_list
-}
-
-func regexp2FindAllString(re *regexp2.Regexp, s string) []string {
-	// 正则匹配提取
-	var matches []string
-	m, _ := re.FindStringMatch(s)
-	for m != nil {
-		matches = append(matches, m.String())
-		m, _ = re.FindNextMatch(m)
-	}
-	return matches
-}
-
-func domain_valid(domain string) bool {
-	// 检查domain是否符合url格式
-	_, err := url.Parse("http://" + domain)
-	if err != nil {
-		return false
-	}
-
-	// DNS 查询
-	dnsClient, _ := dnsx.New(dnsx.DefaultOptions)
-
-	// DNS 查询 A 记录
-	result, _ := dnsClient.Lookup(domain)
-
-	if len(result) == 0 {
-		return false
-	}
-
-	return true
+	notify.SendRequest(webhookurl, params)
 }
