@@ -7,11 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
-	"unsafe"
+
+	"github.com/baiqll/bountytr/src/lib"
 )
 
 type Dingtalker interface {
@@ -279,8 +279,6 @@ func (receiver Robot) SendWholeActioncard(title string, text string, singtitle s
 
 func SendRequest(webhook string, params []byte) {
 
-	fmt.Println(webhook)
-
 	reader := bytes.NewReader(params)
 	request, err := http.NewRequest("POST", webhook, reader)
 	if err != nil {
@@ -291,19 +289,7 @@ func SendRequest(webhook string, params []byte) {
 	request.Header.Set("Content-Type", "application/json;charset=UTF-8")
 	client := http.Client{}
 	// 发送请求
-	resp, err := client.Do(request)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-	respBytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-	//byte数组直接转成string，优化内存
-	str := (*string)(unsafe.Pointer(&respBytes))
-	fmt.Println(*str)
+	client.Do(request)
 }
 
 func TargetMarkdown(target_type string, content MessageContent) (msg_content string) {
@@ -316,7 +302,7 @@ func TargetMarkdown(target_type string, content MessageContent) (msg_content str
 
 	var target_content = strings.Join(content.Targets, "\n\n")
 
-	for _, url := range content.Urls {
+	for _, url := range lib.DedupeFromList(content.Urls) {
 
 		url_content_list = append(url_content_list, fmt.Sprintf("[%s](%s)", url, url))
 

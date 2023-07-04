@@ -338,6 +338,7 @@ func run(silent bool) {
 func (bountry Bountry) SendDingtalk(content notify.BountyContent) {
 
 	var msg_content = notify.TargetMarkdown("Hackerone", content.Hackerone) +
+		notify.TargetMarkdown("Bugcrowd", content.Bugcrowd) +
 		notify.TargetMarkdown("Intigriti", content.Intigriti)
 
 	if msg_content == "" {
