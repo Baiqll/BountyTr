@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"runtime"
+	"sync"
+	"time"
 
 	"github.com/baiqll/bountytr/src/models"
 	"github.com/tidwall/gjson"
@@ -46,7 +49,28 @@ func (b BugcrowdTry) ProgramJson(path string) (body []byte, err error) {
 	// 读取响应体
 	body, err = ioutil.ReadAll(resp.Body)
 
+	if resp.StatusCode != 200 {
+		err = fmt.Errorf(resp.Status)
+	}
+
 	return
+}
+
+func (b BugcrowdTry) ProgramPage(page int64) (total_page int64, page_program []models.Bugcrowd, err error) {
+
+	res_data, err := b.ProgramJson(fmt.Sprintf("/programs.json?vdp[]=false&page[]=%d", page))
+	if err != nil {
+		return
+	}
+
+	total_page = gjson.GetBytes(res_data, "meta.totalPages").Int()
+	// current_page = gjson.GetBytes(res_data, "meta.currentPage").Int()
+	program_result := gjson.GetBytes(res_data, "programs")
+
+	err = json.Unmarshal([]byte(program_result.Raw), &page_program)
+
+	return
+
 }
 
 func (b BugcrowdTry) Program() (programs []models.Bugcrowd) {
@@ -54,60 +78,75 @@ func (b BugcrowdTry) Program() (programs []models.Bugcrowd) {
 		获取项目列表
 	*/
 
-	page := 1
-	var total_page int
+	var new_program []models.Bugcrowd
+	new_bugcrowd_program := make(chan models.Bugcrowd) // 创建缓冲通道
 
-	for {
-
-		res_data, err := b.ProgramJson(fmt.Sprintf("/programs.json?vdp[]=false&page[]=%d", page))
-		if err != nil {
-			fmt.Println("bugcrowd 获取programs 失败", err)
-			return
-		}
-
-		if total_page == 0 {
-			total_page = int(gjson.GetBytes(res_data, "meta.totalPages").Int())
-		}
-		if page > total_page {
-			break
-		}
-
-		program_result := gjson.GetBytes(res_data, "programs")
-
-		var new_programs []models.Bugcrowd
-
-		err = json.Unmarshal([]byte(program_result.Raw), &new_programs)
-
-		if err != nil {
-			fmt.Println("bugcrowd 解析失败")
-			return
-		}
-
-		programs = append(programs, new_programs...)
-
-		page += 1
-
+	// 获取第一页信息
+	total_page, new_program, err := b.ProgramPage(1)
+	if err != nil {
+		fmt.Println("bugcrowd 获取programs 失败", err)
+		return
 	}
 
-	for _, item := range programs {
+	// 获取余下所有页面信息
+	var wgp sync.WaitGroup
+	wgp.Add(int(total_page) - 1) // 初始化等待组计数器
+
+	for i := 2; i <= int(total_page); i++ {
+
+		go func(page int) {
+
+			defer wgp.Done()
+			_, program, err := b.ProgramPage(int64(i))
+
+			if err != nil {
+				fmt.Println("bugcrowd 获取programs 失败", err)
+			}
+
+			new_program = append(new_program, program...)
+
+		}(i)
+	}
+
+	wgp.Wait()
+
+	/*
+		获取项目具体 目标
+	*/
+
+	var wg sync.WaitGroup
+	wg.Add(len(new_program)) // 初始化等待组计数器
+
+	for _, item := range new_program {
 
 		item.Url = "https://bugcrowd.com" + item.ProgramUrl
 
 		if item.InvitedStatus != "open" || item.Participation == "private" {
 			// 未开启，或者私密项目
+			wg.Done()
 			continue
 		}
 
-		item.Targets.InScope, item.Targets.OutOfScope = b.Scope(item.ProgramUrl)
+		go b.Scope(item, new_bugcrowd_program, &wg)
 
-		b.Programs = append(b.Programs, item)
+		numGoroutines := runtime.NumGoroutine()
+
+		if numGoroutines > 100 {
+			time.Sleep(3 * time.Second)
+		}
 
 	}
 
-	programs = b.Programs
-
-	return
-
+	// 从缓冲通道读取数据
+	for {
+		select {
+		case scope_program := <-new_bugcrowd_program:
+			programs = append(programs, scope_program)
+		case <-time.After(10 * time.Second):
+			wg.Wait()
+			return
+		}
+	}
 }
 
 func (b BugcrowdTry) Target(url string) (scope []models.BugcrowdScope, err error) {
@@ -128,12 +167,13 @@ func (b BugcrowdTry) Target(url string) (scope []models.BugcrowdScope, err error
 
 }
 
-func (b BugcrowdTry) Scope(programUrl string) (in_scopes []models.BugcrowdScope, out_scopes []models.BugcrowdScope) {
+func (b BugcrowdTry) Scope(bugcrowd models.Bugcrowd, new_bugcrowd_program chan models.Bugcrowd, wg *sync.WaitGroup) (in_scopes []models.BugcrowdScope, out_scopes []models.BugcrowdScope) {
 	/*
 		获取项目赏金目标
 	*/
+	defer wg.Done()
 
-	target_data, err := b.ProgramJson(programUrl + "/target_groups")
+	target_data, err := b.ProgramJson(bugcrowd.ProgramUrl + "/target_groups")
 	if err != nil {
 		fmt.Println("bugcrowd 获取target_groups 失败")
 		return
@@ -144,6 +184,13 @@ func (b BugcrowdTry) Scope(programUrl string) (in_scopes []models.BugcrowdScope,
 
 	in_scopes, _ = b.Target(in_result.Str)
 	out_scopes, _ = b.Target(out_result.Str)
+
+	bugcrowd.Targets.InScope = in_scopes
+	bugcrowd.Targets.OutOfScope = out_scopes
+
+	new_bugcrowd_program <- bugcrowd
+
+	// fmt.Printf("【%s】\n", bugcrowd.ProgramUrl)
 
 	return
 
