@@ -33,9 +33,9 @@ type Config struct {
 
 func Initconfig(source_path string) (config Config) {
 	config = Config{
-		HackerOne: false,
-		Bugcrowd:  false,
-		Intigriti: false,
+		HackerOne: true,
+		Bugcrowd:  true,
+		Intigriti: true,
 		DingTalk: DingTalk{
 			AppKey:    "",
 			AppSecret: "",
