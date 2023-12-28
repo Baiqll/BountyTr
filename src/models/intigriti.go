@@ -8,6 +8,7 @@ type Bounty struct {
 type IntigritiScope struct {
 	Type        string `json:"type"`
 	Endpoint    string `json:"endpoint"`
+	Impact      string `json:"impact"`
 	Description string `json:"description"`
 }
 
@@ -18,12 +19,12 @@ type IntigritiTarget struct {
 
 type Intigriti struct {
 	Name                 string          `json:"name"`
-	CompanyHandle        string          `json:"company_handle"`
+	CompanyHandle        string          `json:"companyHandle"`
 	Handle               string          `json:"handle"`
 	Url                  string          `json:"url"`
 	Status               string          `json:"status"`
-	ConfidentialityLevel string          `json:"confidentiality_level"`
-	MinBounty            Bounty          `json:"min_bounty"`
-	MaxBounty            Bounty          `json:"max_bounty"`
+	ConfidentialityLevel int64           `json:"confidentialityLevel"`
+	MinBounty            Bounty          `json:"minBounty"`
+	MaxBounty            Bounty          `json:"maxBounty"`
 	Targets              IntigritiTarget `json:"targets"`
 }

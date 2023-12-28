@@ -7,11 +7,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type DingTalk struct {
-	AppKey    string `yaml:"AppKey"`
-	AppSecret string `yaml:"AppSecret"`
-}
-
 type Bugcrowd struct {
 	Url string `yaml:"Url"`
 }
@@ -23,22 +18,34 @@ type HackerOne struct {
 type Intigriti struct {
 	Url string `yaml:"Url"`
 }
+type DingTalk struct {
+	AppKey    string `yaml:"AppKey"`
+	AppSecret string `yaml:"AppSecret"`
+}
 
 type Config struct {
-	DingTalk  DingTalk  `yaml:"DingTalk"`
-	Bugcrowd  Bugcrowd  `yaml:"Bugcrowd"`
-	HackerOne HackerOne `yaml:"HackerOne"`
-	Intigriti Intigriti `yaml:"Intigriti"`
+	Bugcrowd  bool     `yaml:"Bugcrowd"`
+	HackerOne bool     `yaml:"HackerOne"`
+	Intigriti bool     `yaml:"Intigriti"`
+	Blacklist []string `yaml:"Black"`
+	DingTalk  DingTalk `yaml:"DingTalk"`
 }
 
 func Initconfig(source_path string) (config Config) {
 	config = Config{
-		HackerOne: HackerOne{Url: "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/hackerone_data.json"},
-		Bugcrowd:  Bugcrowd{Url: "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/bugcrowd_data.json"},
-		Intigriti: Intigriti{Url: "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/intigriti_data.json"},
+		HackerOne: false,
+		Bugcrowd:  false,
+		Intigriti: false,
 		DingTalk: DingTalk{
 			AppKey:    "",
 			AppSecret: "",
+		},
+		Blacklist: []string{
+			".gov",
+			".edu",
+			".json",
+			".[0-9.]+$",
+			"https://github.com/",
 		},
 	}
 
@@ -57,7 +64,7 @@ func GetConfig(source_path string) (config Config) {
 		config = Initconfig(source_path)
 		return
 	}
-	err = yaml.Unmarshal(content, &config)
+	yaml.Unmarshal(content, &config)
 
 	return
 }

@@ -4,15 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"os/user"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/dlclark/regexp2"
 	"github.com/edsrzf/mmap-go"
-	"github.com/projectdiscovery/dnsx/libs/dnsx"
 	"golang.org/x/sys/unix"
 )
 
@@ -21,6 +20,7 @@ var Blacklist = []string{
 	".edu",
 	".json",
 	".[0-9.]+$",
+	"https://github.com/",
 }
 
 func In(target string, str_array []string) bool {
@@ -33,19 +33,23 @@ func In(target string, str_array []string) bool {
 	return false
 }
 
-func DomainMatch(url string) []string {
-	// 提取域名
+func DomainMatch(url string, blacklist []string) []string {
+	/*
+		提取域名
+	*/
+	if blacklist == nil {
+		blacklist = Blacklist
+	}
 
 	// 黑名单正则
 	var black_pattern []string
-	for _, black := range Blacklist {
-
+	for _, black := range blacklist {
 		black_pattern = append(black_pattern, fmt.Sprintf(".*%s", black))
 	}
 
 	// 特殊过滤
 	// black_pattern = append(black_pattern, filterlist...)
-	pattern := fmt.Sprintf(`(?!%s)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`, strings.Join(black_pattern, "|"))
+	pattern := fmt.Sprintf(`(?!%s)(https?:\/\/)?[a-zA-Z0-9*][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9\/?=&\*]{0,80})+`, strings.Join(black_pattern, "|"))
 
 	domain_rege := regexp2.MustCompile(pattern, 0)
 	// domain_rege := regexp.MustCompile(`^(?!.*gov|.*edu)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+`)
@@ -149,21 +153,9 @@ func Regexp2FindAllString(re *regexp2.Regexp, s string) []string {
 }
 
 func DomainValid(domain string) bool {
-	// 检查domain是否符合url格式
-	_, err := url.Parse("http://" + domain)
-	if err != nil {
-		return false
-	}
 
-	// DNS 查询
-	dnsClient, _ := dnsx.New(dnsx.DefaultOptions)
+	// 域名正则表达式
+	domainRegex := regexp.MustCompile(`(https?:\/\/)?(?:[a-zA-Z0-9*](?:(?:[a-zA-Z0-9]|-)*[a-zA-Z0-9])?\.)+(?:[a-zA-Z]{2,})([/\w?&\.=\-]+)?`)
 
-	// DNS 查询 A 记录
-	result, _ := dnsClient.Lookup(domain)
-
-	if len(result) == 0 {
-		return false
-	}
-
-	return true
+	return domainRegex.MatchString(domain)
 }
