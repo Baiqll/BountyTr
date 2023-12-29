@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +106,7 @@ func (i IntigritiTry) Program() (programs []models.Intigriti) {
 
 	var new_program []models.Intigriti
 	new_intigriti_program := make(chan models.Intigriti) // 创建缓冲通道
+	semaphore := make(chan struct{}, 50)                 //控制并发数
 
 	tag, err := i.BuildId()
 	if err != nil {
@@ -126,20 +126,14 @@ func (i IntigritiTry) Program() (programs []models.Intigriti) {
 	json.Unmarshal([]byte(result.Raw), &new_program)
 
 	var wg sync.WaitGroup
-	wg.Add(len(new_program)) // 初始化等待组计数器
 
 	for _, item := range new_program {
+		wg.Add(1)
 
 		if item.ConfidentialityLevel == 4 {
-			go i.Scope(item, new_intigriti_program, &wg)
+			go i.Scope(item, new_intigriti_program, semaphore, &wg)
 		} else {
 			wg.Done()
-		}
-
-		numGoroutines := runtime.NumGoroutine()
-
-		if numGoroutines > 200 {
-			time.Sleep(3 * time.Second)
 		}
 	}
 
@@ -156,11 +150,13 @@ func (i IntigritiTry) Program() (programs []models.Intigriti) {
 
 }
 
-func (i IntigritiTry) Scope(intigriti models.Intigriti, new_intigriti_program chan models.Intigriti, wg *sync.WaitGroup) (in_scopes []models.IntigritiScope, out_scopes []models.IntigritiScope) {
+func (i IntigritiTry) Scope(intigriti models.Intigriti, new_intigriti_program chan models.Intigriti, semaphore chan struct{}, wg *sync.WaitGroup) (in_scopes []models.IntigritiScope, out_scopes []models.IntigritiScope) {
 	/*
 		获取项目赏金目标
 	*/
 	defer wg.Done()
+
+	semaphore <- struct{}{}
 
 	url := fmt.Sprintf("https://app.intigriti.com/programs/%s/%s/detail", intigriti.Handle, intigriti.Handle)
 
@@ -199,6 +195,8 @@ func (i IntigritiTry) Scope(intigriti models.Intigriti, new_intigriti_program ch
 
 	intigriti.Targets.InScope = in_scopes
 	intigriti.Targets.OutOfScope = out_scopes
+
+	<-semaphore
 
 	new_intigriti_program <- intigriti
 

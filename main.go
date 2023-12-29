@@ -80,7 +80,7 @@ func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[strin
 		for _, scope := range target.Targets.InScope {
 
 			// 只打印 Web 目标
-			if lib.In(scope.Category, []string{"api", "website"}) {
+			if lib.In(scope.Category, []string{"api", "website", "other"}) {
 				for _, domain := range b.DomainMatch(scope.Name) {
 					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
 						if lib.DomainValid(domain) {
@@ -94,6 +94,7 @@ func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[strin
 				}
 			}
 		}
+
 	}
 
 	return
@@ -180,6 +181,7 @@ func (b Bountry) intigriti(source_targets map[string]bool, fail_targets map[stri
 		if target.MaxBounty.Value <= 0 {
 			continue
 		}
+
 		for _, scope := range target.Targets.InScope {
 			// 只打印 Web 目标
 			if lib.In(scope.Type, []string{"URL", "Other"}) {

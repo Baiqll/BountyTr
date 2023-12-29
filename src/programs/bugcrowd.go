@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"runtime"
 	"sync"
 	"time"
 
@@ -80,8 +79,9 @@ func (b BugcrowdTry) Program() (programs []models.Bugcrowd) {
 
 	var new_program []models.Bugcrowd
 	new_bugcrowd_program := make(chan models.Bugcrowd) // 创建缓冲通道
+	semaphore := make(chan struct{}, 15)               // 最高并发数
 
-	// 获取第一页信息
+	// 获取第一页信息(获取总页数 total_page)
 	total_page, new_program, err := b.ProgramPage(1)
 	if err != nil {
 		fmt.Println("bugcrowd 获取programs 失败", err)
@@ -97,7 +97,7 @@ func (b BugcrowdTry) Program() (programs []models.Bugcrowd) {
 		go func(page int) {
 
 			defer wgp.Done()
-			_, program, err := b.ProgramPage(int64(i))
+			_, program, err := b.ProgramPage(int64(page))
 
 			if err != nil {
 				fmt.Println("bugcrowd 获取programs 失败", err)
@@ -115,9 +115,9 @@ func (b BugcrowdTry) Program() (programs []models.Bugcrowd) {
 	*/
 
 	var wg sync.WaitGroup
-	wg.Add(len(new_program)) // 初始化等待组计数器
 
 	for _, item := range new_program {
+		wg.Add(1)
 
 		item.Url = "https://bugcrowd.com" + item.ProgramUrl
 
@@ -127,13 +127,7 @@ func (b BugcrowdTry) Program() (programs []models.Bugcrowd) {
 			continue
 		}
 
-		go b.Scope(item, new_bugcrowd_program, &wg)
-
-		numGoroutines := runtime.NumGoroutine()
-
-		if numGoroutines > 100 {
-			time.Sleep(3 * time.Second)
-		}
+		go b.Scope(item, new_bugcrowd_program, semaphore, &wg)
 
 	}
 
@@ -167,26 +161,36 @@ func (b BugcrowdTry) Target(url string) (scope []models.BugcrowdScope, err error
 
 }
 
-func (b BugcrowdTry) Scope(bugcrowd models.Bugcrowd, new_bugcrowd_program chan models.Bugcrowd, wg *sync.WaitGroup) (in_scopes []models.BugcrowdScope, out_scopes []models.BugcrowdScope) {
+func (b BugcrowdTry) Scope(bugcrowd models.Bugcrowd, new_bugcrowd_program chan models.Bugcrowd, semaphore chan struct{}, wg *sync.WaitGroup) (in_scopes []models.BugcrowdScope, out_scopes []models.BugcrowdScope) {
 	/*
 		获取项目赏金目标
 	*/
 	defer wg.Done()
+	semaphore <- struct{}{}
 
 	target_data, err := b.ProgramJson(bugcrowd.ProgramUrl + "/target_groups")
 	if err != nil {
-		fmt.Println("bugcrowd 获取target_groups 失败")
+		fmt.Println("bugcrowd 获取target_groups 失败", err)
 		return
 	}
 
-	in_result := gjson.GetBytes(target_data, "groups.#(in_scope==true).targets_url")
-	out_result := gjson.GetBytes(target_data, "groups.#(in_scope==false).targets_url")
+	in_result := gjson.GetBytes(target_data, "groups.#(in_scope==true)#.targets_url")
+	// out_result := gjson.GetBytes(target_data, "groups.#(in_scope==false)#.targets_url")
 
-	in_scopes, _ = b.Target(in_result.Str)
-	out_scopes, _ = b.Target(out_result.Str)
+	for _, item := range in_result.Array() {
+		new_in_scopes, _ := b.Target(item.Str)
+		in_scopes = append(in_scopes, new_in_scopes...)
+	}
+
+	// for _, item := range out_result.Array() {
+	// 	new_out_scopes, _ := b.Target(item.Str)
+	// 	out_scopes = append(out_scopes, new_out_scopes...)
+	// }
 
 	bugcrowd.Targets.InScope = in_scopes
-	bugcrowd.Targets.OutOfScope = out_scopes
+	// bugcrowd.Targets.OutOfScope = out_scopes
+
+	<-semaphore
 
 	new_bugcrowd_program <- bugcrowd
 

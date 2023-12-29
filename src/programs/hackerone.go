@@ -29,8 +29,19 @@ func NewHackeroneTry(url string) *HackeroneTry {
 
 func (h HackeroneTry) ProgramGraphql(data *bytes.Buffer) (body []byte, err error) {
 
-	// 请求JSON数据
-	resp, err := http.Post("https://hackerone.com/graphql", "application/json", data)
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	req, err := http.NewRequest("POST", "https://hackerone.com/graphql", data)
+	if err != nil {
+		return
+	}
+
+	// 设置请求头
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return
 	}
