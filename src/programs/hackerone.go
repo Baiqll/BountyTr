@@ -15,22 +15,34 @@ import (
 )
 
 type HackeroneTry struct {
-	Url      string             `json:"url"`
-	Programs []models.Hackerone `json:"programs"`
+	// Url      string             `json:"url"`
+	Programs    []models.Hackerone `json:"programs"`
+	Concurrency int                `json:"concurrency"`
 }
 
-func NewHackeroneTry(url string) *HackeroneTry {
+func NewHackeroneTry(concurrency int) *HackeroneTry {
 
 	return &HackeroneTry{
-		Url:      url,
-		Programs: []models.Hackerone{},
+		Programs:    []models.Hackerone{},
+		Concurrency: concurrency,
 	}
 }
 
 func (h HackeroneTry) ProgramGraphql(data *bytes.Buffer) (body []byte, err error) {
 
-	// 请求JSON数据
-	resp, err := http.Post("https://hackerone.com/graphql", "application/json", data)
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	req, err := http.NewRequest("POST", "https://hackerone.com/graphql", data)
+	if err != nil {
+		return
+	}
+
+	// 设置请求头
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return
 	}
@@ -47,6 +59,7 @@ func (h HackeroneTry) Program() (programs []models.Hackerone) {
 	*/
 	var new_programs []models.Hackerone
 	new_hackerone_program := make(chan models.Hackerone) // 创建缓冲通道
+	semaphore := make(chan struct{}, h.Concurrency)      // 最高并发数
 
 	data := bytes.NewBufferString(`{"operationName":"DirectoryQuery","variables":{"where":{"_and":[{"_or":[{"offers_bounties":{"_eq":true}},{"external_program":{"offers_rewards":{"_eq":true}}}]},{"_or":[{"submission_state":{"_eq":"open"}},{"submission_state":{"_eq":"api_only"}},{"external_program":{}}]},{"_not":{"external_program":{}}},{"_or":[{"_and":[{"state":{"_neq":"sandboxed"}},{"state":{"_neq":"soft_launched"}}]},{"external_program":{}}]}]},"first":1000,"secureOrderBy":{"launched_at":{"_direction":"DESC"}},"product_area":"directory","product_feature":"programs"},"query":"query DirectoryQuery($cursor: String, $secureOrderBy: FiltersTeamFilterOrder, $where: FiltersTeamFilterInput) {\n  me {\n    id\n    edit_unclaimed_profiles\n    __typename\n  }\n  teams(first: 1000, after: $cursor, secure_order_by: $secureOrderBy, where: $where) {\n    pageInfo {\n      endCursor\n      hasNextPage\n      __typename\n    }\n    edges {\n      node {\n        id\n        bookmarked\n        ...TeamTableResolvedReports\n        ...TeamTableAvatarAndTitle\n        ...TeamTableLaunchDate\n        ...TeamTableMinimumBounty\n        ...TeamTableAverageBounty\n        ...BookmarkTeam\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment TeamTableResolvedReports on Team {\n  id\n  resolved_report_count\n  __typename\n}\n\nfragment TeamTableAvatarAndTitle on Team {\n  id\n  profile_picture(size: medium)\n  name\n  handle\n  submission_state\n  triage_active\n  publicly_visible_retesting\n  state\n  allows_bounty_splitting\n  external_program {\n    id\n    __typename\n  }\n  ...TeamLinkWithMiniProfile\n  __typename\n}\n\nfragment TeamLinkWithMiniProfile on Team {\n  id\n  handle\n  name\n  __typename\n}\n\nfragment TeamTableLaunchDate on Team {\n  id\n  launched_at\n  __typename\n}\n\nfragment TeamTableMinimumBounty on Team {\n  id\n  currency\n  base_bounty\n  __typename\n}\n\nfragment TeamTableAverageBounty on Team {\n  id\n  currency\n  average_bounty_lower_amount\n  average_bounty_upper_amount\n  __typename\n}\n\nfragment BookmarkTeam on Team {\n  id\n  bookmarked\n  __typename\n}\n"}`)
 
@@ -76,7 +89,7 @@ func (h HackeroneTry) Program() (programs []models.Hackerone) {
 			continue
 		}
 
-		go h.Scope(item, new_hackerone_program, &wg)
+		go h.Scope(item, new_hackerone_program, semaphore, &wg)
 
 		numGoroutines := runtime.NumGoroutine()
 
@@ -99,12 +112,13 @@ func (h HackeroneTry) Program() (programs []models.Hackerone) {
 
 }
 
-func (h HackeroneTry) Scope(hackerone models.Hackerone, new_hackerone_program chan models.Hackerone, wg *sync.WaitGroup) (in_scopes []models.HackeroneScope, out_scopes []models.HackeroneScope) {
+func (h HackeroneTry) Scope(hackerone models.Hackerone, new_hackerone_program chan models.Hackerone, semaphore chan struct{}, wg *sync.WaitGroup) (in_scopes []models.HackeroneScope, out_scopes []models.HackeroneScope) {
 	/*
 		获取项目赏金目标
 	*/
 	defer wg.Done()
 
+	semaphore <- struct{}{}
 	data := bytes.NewBufferString(fmt.Sprintf(`{"operationName":"TeamAssets","variables":{"handle":"%s","product_area":"team_profile","product_feature":"overview"},"query":"query TeamAssets($handle: String!) {\n  me {\n    id\n    membership(team_handle: $handle) {\n      id\n      permissions\n      __typename\n    }\n    __typename\n  }\n  team(handle: $handle) {\n    id\n    handle\n    structured_scope_versions(archived: false) {\n      max_updated_at\n      __typename\n    }\n    in_scope_assets: structured_scopes(\n      archived: false\n      eligible_for_submission: true\n    ) {\n      edges {\n        node {\n          id\n          asset_type\n          asset_identifier\n          instruction\n          max_severity\n          eligible_for_bounty\n          labels(first: 100) {\n            edges {\n              node {\n                id\n                name\n                __typename\n              }\n              __typename\n            }\n            __typename\n          }\n          __typename\n        }\n        __typename\n      }\n      __typename\n    }\n    out_scope_assets: structured_scopes(\n      archived: false\n      eligible_for_submission: false\n    ) {\n      edges {\n        node {\n          id\n          asset_type\n          asset_identifier\n          instruction\n          __typename\n        }\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n"}`, hackerone.Handle))
 
 	res_data, err := h.ProgramGraphql(data)
@@ -130,6 +144,8 @@ func (h HackeroneTry) Scope(hackerone models.Hackerone, new_hackerone_program ch
 
 	hackerone.Targets.InScope = in_scopes
 	hackerone.Targets.OutOfScope = out_scopes
+
+	<-semaphore
 
 	new_hackerone_program <- hackerone
 

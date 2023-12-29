@@ -5,6 +5,7 @@ type BugcrowdScope struct {
 	Category    string `json:"category"`
 	Description string `json:"description"`
 	IpAddress   string `json:"ipAddress"`
+	Url         string `json:"uri"`
 }
 
 type BugcrowdTarget struct {

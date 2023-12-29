@@ -8,15 +8,18 @@ import (
 )
 
 type Bugcrowd struct {
-	Url string `yaml:"Url"`
+	Enable      bool `yaml:"enable"`
+	Concurrency int  `yaml:"concurrency"`
 }
 
 type HackerOne struct {
-	Url string `yaml:"Url"`
+	Enable      bool `yaml:"enable"`
+	Concurrency int  `yaml:"concurrency"`
 }
 
 type Intigriti struct {
-	Url string `yaml:"Url"`
+	Enable      bool `yaml:"enable"`
+	Concurrency int  `yaml:"concurrency"`
 }
 type DingTalk struct {
 	AppKey    string `yaml:"AppKey"`
@@ -24,18 +27,18 @@ type DingTalk struct {
 }
 
 type Config struct {
-	Bugcrowd  bool     `yaml:"Bugcrowd"`
-	HackerOne bool     `yaml:"HackerOne"`
-	Intigriti bool     `yaml:"Intigriti"`
-	Blacklist []string `yaml:"Black"`
-	DingTalk  DingTalk `yaml:"DingTalk"`
+	Bugcrowd  Bugcrowd  `yaml:"Bugcrowd"`
+	HackerOne HackerOne `yaml:"HackerOne"`
+	Intigriti Intigriti `yaml:"Intigriti"`
+	Blacklist []string  `yaml:"Black"`
+	DingTalk  DingTalk  `yaml:"DingTalk"`
 }
 
 func Initconfig(source_path string) (config Config) {
 	config = Config{
-		HackerOne: true,
-		Bugcrowd:  true,
-		Intigriti: true,
+		HackerOne: HackerOne{Enable: true, Concurrency: 200},
+		Bugcrowd:  Bugcrowd{Enable: true, Concurrency: 15},
+		Intigriti: Intigriti{Enable: true, Concurrency: 50},
 		DingTalk: DingTalk{
 			AppKey:    "",
 			AppSecret: "",
@@ -45,7 +48,6 @@ func Initconfig(source_path string) (config Config) {
 			".edu",
 			".json",
 			".[0-9.]+$",
-			"https://github.com/",
 		},
 	}
 

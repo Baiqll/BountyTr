@@ -56,11 +56,18 @@ type Bountry struct {
 
 func NewBountry(source_path string) *Bountry {
 
+	/*
+		https://hackerone.com/directory/programs
+		https://bugcrowd.com/programs
+		https://www.intigriti.com/programs
+
+	*/
+
 	config := lib.GetConfig(source_path)
 	return &Bountry{
-		HackeroneTry: *programs.NewHackeroneTry("https://hackerone.com/directory/programs"),
-		BugcrowdTry:  *programs.NewBugcrowdTry("https://bugcrowd.com/programs"),
-		IntigritiTry: *programs.NewIntigritiTry("https://www.intigriti.com/programs"),
+		HackeroneTry: *programs.NewHackeroneTry(config.HackerOne.Concurrency),
+		BugcrowdTry:  *programs.NewBugcrowdTry(config.Bugcrowd.Concurrency),
+		IntigritiTry: *programs.NewIntigritiTry(config.Intigriti.Concurrency),
 		DingTalk:     config.DingTalk,
 		Config:       config,
 	}
@@ -80,8 +87,8 @@ func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[strin
 		for _, scope := range target.Targets.InScope {
 
 			// 只打印 Web 目标
-			if lib.In(scope.Category, []string{"api", "website"}) {
-				for _, domain := range b.DomainMatch(scope.Name) {
+			if lib.In(scope.Category, []string{"api", "website", "other"}) {
+				for _, domain := range b.DomainMatch(scope.Url) {
 					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
 						if lib.DomainValid(domain) {
 							fmt.Println(strings.ReplaceAll(domain, "*.", ""))
@@ -94,6 +101,7 @@ func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[strin
 				}
 			}
 		}
+
 	}
 
 	return
@@ -180,6 +188,7 @@ func (b Bountry) intigriti(source_targets map[string]bool, fail_targets map[stri
 		if target.MaxBounty.Value <= 0 {
 			continue
 		}
+
 		for _, scope := range target.Targets.InScope {
 			// 只打印 Web 目标
 			if lib.In(scope.Type, []string{"URL", "Other"}) {
@@ -271,13 +280,13 @@ func run(silent bool) {
 	// 获取新增赏金目标
 	var new_hackerone_fail_targets, new_hackerone_targets, new_hackerone_url, new_bugcrowd_fail_targets, new_bugcrowd_targets, new_bugcrowd_url, new_intigriti_fail_targets, new_intigriti_targets, new_intigriti_url []string
 
-	if bountry.Config.HackerOne {
+	if bountry.Config.HackerOne.Enable {
 		new_hackerone_fail_targets, new_hackerone_targets, new_hackerone_url = bountry.hackerone(source_targets, fail_targets)
 	}
-	if bountry.Config.Bugcrowd {
+	if bountry.Config.Bugcrowd.Enable {
 		new_bugcrowd_fail_targets, new_bugcrowd_targets, new_bugcrowd_url = bountry.bugcrowd(source_targets, fail_targets)
 	}
-	if bountry.Config.Intigriti {
+	if bountry.Config.Intigriti.Enable {
 		new_intigriti_fail_targets, new_intigriti_targets, new_intigriti_url = bountry.intigriti(source_targets, fail_targets)
 	}
 
