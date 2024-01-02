@@ -124,6 +124,8 @@ func (h HackeroneTry) Scope(hackerone models.Hackerone, new_hackerone_program ch
 	res_data, err := h.ProgramGraphql(data)
 	if err != nil {
 		fmt.Println("hackerone Scope 获取失败", err)
+		<-semaphore
+		new_hackerone_program <- hackerone
 		return
 	}
 
@@ -133,6 +135,8 @@ func (h HackeroneTry) Scope(hackerone models.Hackerone, new_hackerone_program ch
 	err = json.Unmarshal([]byte(in_result.Raw), &in_scopes)
 	if err != nil {
 		fmt.Println("hackerone Scope 解析失败", err)
+		<-semaphore
+		new_hackerone_program <- hackerone
 		return
 	}
 

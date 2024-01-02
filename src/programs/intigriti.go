@@ -162,14 +162,13 @@ func (i IntigritiTry) Scope(intigriti models.Intigriti, new_intigriti_program ch
 	res_data, err := i.ProgramRquest(url)
 	if err != nil {
 		fmt.Println("intigriti 获取 target 失败", err)
+		<-semaphore
+
+		new_intigriti_program <- intigriti
 		return
 	}
 
-	doc, err := html.Parse(strings.NewReader(string(res_data)))
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	doc, _ := html.Parse(strings.NewReader(string(res_data)))
 
 	container := i.FindByClass(doc, "domain-container")
 

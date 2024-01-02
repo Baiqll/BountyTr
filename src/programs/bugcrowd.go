@@ -173,6 +173,9 @@ func (b BugcrowdTry) Scope(bugcrowd models.Bugcrowd, new_bugcrowd_program chan m
 	target_data, err := b.ProgramJson(bugcrowd.ProgramUrl + "/target_groups")
 	if err != nil {
 		fmt.Println("bugcrowd 获取target_groups 失败", err)
+
+		<-semaphore
+		new_bugcrowd_program <- bugcrowd
 		return
 	}
 
