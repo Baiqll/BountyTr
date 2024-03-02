@@ -46,13 +46,22 @@ func (t *Task) Run() {
 	}
 }
 
-type Bountry struct {
-	BugcrowdTry  programs.BugcrowdTry
-	HackeroneTry programs.HackeroneTry
-	IntigritiTry programs.IntigritiTry
-	DingTalk     lib.DingTalk
-	Config       lib.Config
-}
+type (
+	Bountry struct {
+		BugcrowdTry  programs.BugcrowdTry
+		HackeroneTry programs.HackeroneTry
+		IntigritiTry programs.IntigritiTry
+		DingTalk     lib.DingTalk
+		Config       lib.Config
+	}
+
+	NewScope struct {
+		error_targets  []string
+		new_targets    []string
+		new_bounty_url []string
+		new_app        []string
+	}
+)
 
 func NewBountry(source_path string) *Bountry {
 
@@ -73,7 +82,7 @@ func NewBountry(source_path string) *Bountry {
 	}
 }
 
-func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string, new_bounty_url []string) {
+func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[string]bool) (new_scope NewScope) {
 
 	targets := b.BugcrowdTry.Program()
 
@@ -89,16 +98,19 @@ func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[strin
 			// 只打印 Web 目标
 			if lib.In(scope.Category, []string{"api", "website", "other"}) {
 				for _, domain := range b.DomainMatch(scope.Url) {
-					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+					if !source_targets[domain] && !lib.In(domain, new_scope.new_targets) && !fail_targets[domain] {
 						if lib.DomainValid(domain) {
 							fmt.Println(strings.ReplaceAll(domain, "*.", ""))
-							new_targets = append(new_targets, domain)
-							new_bounty_url = append(new_bounty_url, target.Url)
+							new_scope.new_targets = append(new_scope.new_targets, domain)
+							new_scope.new_bounty_url = append(new_scope.new_bounty_url, target.Url)
 						} else {
-							error_targets = append(error_targets, domain)
+							new_scope.error_targets = append(new_scope.error_targets, domain)
 						}
 					}
 				}
+			} else if lib.In(scope.Category, []string{"android", "ios"}) {
+				new_scope.new_app = append(new_scope.new_app, scope.Url)
+				new_scope.new_bounty_url = append(new_scope.new_bounty_url, target.Url)
 			}
 		}
 
@@ -107,7 +119,7 @@ func (b Bountry) bugcrowd(source_targets map[string]bool, fail_targets map[strin
 	return
 }
 
-func (b Bountry) hackerone(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string, new_bounty_url []string) {
+func (b Bountry) hackerone(source_targets map[string]bool, fail_targets map[string]bool) (new_scope NewScope) {
 
 	targets := b.HackeroneTry.Program()
 
@@ -135,13 +147,13 @@ func (b Bountry) hackerone(source_targets map[string]bool, fail_targets map[stri
 			// 只打印 Web 目标
 			if lib.In(scope.AssetType, []string{"URL", "WILDCARD", "Domain"}) {
 				for _, domain := range b.DomainMatch(scope.AssetIdentifier) {
-					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+					if !source_targets[domain] && !lib.In(domain, new_scope.new_targets) && !fail_targets[domain] {
 						if lib.DomainValid(domain) {
 							fmt.Println(strings.ReplaceAll(domain, "*.", ""))
-							new_targets = append(new_targets, domain)
-							new_bounty_url = append(new_bounty_url, target.Url)
+							new_scope.new_targets = append(new_scope.new_targets, domain)
+							new_scope.new_bounty_url = append(new_scope.new_bounty_url, target.Url)
 						} else {
-							error_targets = append(error_targets, domain)
+							new_scope.error_targets = append(new_scope.error_targets, domain)
 						}
 					}
 				}
@@ -150,27 +162,34 @@ func (b Bountry) hackerone(source_targets map[string]bool, fail_targets map[stri
 			// 其他
 			if lib.In(scope.AssetType, []string{"OTHER"}) {
 				for _, domain := range b.DomainMatch(scope.AssetIdentifier) {
-					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+					if !source_targets[domain] && !lib.In(domain, new_scope.new_targets) && !fail_targets[domain] {
 						if !lib.DomainValid(domain) {
 							fmt.Println(strings.ReplaceAll(domain, "*.", ""))
-							new_targets = append(new_targets, domain)
-							new_bounty_url = append(new_bounty_url, target.Url)
+							new_scope.new_targets = append(new_scope.new_targets, domain)
+							new_scope.new_bounty_url = append(new_scope.new_bounty_url, target.Url)
 						} else {
-							error_targets = append(error_targets, domain)
+							new_scope.error_targets = append(new_scope.error_targets, domain)
 						}
 					}
 				}
 				for _, domain := range b.DomainMatch(scope.Instruction) {
-					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+					if !source_targets[domain] && !lib.In(domain, new_scope.new_targets) && !fail_targets[domain] {
 						if lib.DomainValid(domain) {
 							fmt.Println(strings.ReplaceAll(domain, "*.", ""))
-							new_targets = append(new_targets, domain)
-							new_bounty_url = append(new_bounty_url, target.Url)
+							new_scope.new_targets = append(new_scope.new_targets, domain)
+							new_scope.new_bounty_url = append(new_scope.new_bounty_url, target.Url)
 						} else {
-							error_targets = append(error_targets, domain)
+							new_scope.error_targets = append(new_scope.error_targets, domain)
 						}
 					}
 				}
+			}
+
+			if lib.In(scope.AssetType, []string{"GOOGLE_PLAY_APP_ID", "TESTFLIGHT", "APPLE_STORE_APP_ID", "OTHER_APK"}) {
+
+				new_scope.new_app = append(new_scope.new_app, scope.AssetIdentifier)
+				new_scope.new_bounty_url = append(new_scope.new_bounty_url, target.Url)
+
 			}
 		}
 	}
@@ -178,7 +197,7 @@ func (b Bountry) hackerone(source_targets map[string]bool, fail_targets map[stri
 	return
 }
 
-func (b Bountry) intigriti(source_targets map[string]bool, fail_targets map[string]bool) (error_targets []string, new_targets []string, new_bounty_url []string) {
+func (b Bountry) intigriti(source_targets map[string]bool, fail_targets map[string]bool) (new_scope NewScope) {
 
 	targets := b.IntigritiTry.Program()
 
@@ -193,16 +212,21 @@ func (b Bountry) intigriti(source_targets map[string]bool, fail_targets map[stri
 			// 只打印 Web 目标
 			if lib.In(scope.Type, []string{"URL", "Other"}) {
 				for _, domain := range b.DomainMatch(scope.Endpoint) {
-					if !source_targets[domain] && !lib.In(domain, new_targets) && !fail_targets[domain] {
+					if !source_targets[domain] && !lib.In(domain, new_scope.new_targets) && !fail_targets[domain] {
 						if lib.DomainValid(domain) {
 							fmt.Println(strings.ReplaceAll(domain, "*.", ""))
-							new_targets = append(new_targets, domain)
-							new_bounty_url = append(new_bounty_url, target.Url)
+							new_scope.new_targets = append(new_scope.new_targets, domain)
+							new_scope.new_bounty_url = append(new_scope.new_bounty_url, target.Url)
 						} else {
-							error_targets = append(error_targets, domain)
+							new_scope.error_targets = append(new_scope.error_targets, domain)
 						}
 					}
 				}
+			} else if lib.In(scope.Type, []string{"ios", "android"}) {
+
+				new_scope.new_app = append(new_scope.new_app, scope.Endpoint)
+				new_scope.new_bounty_url = append(new_scope.new_bounty_url, target.Url)
+
 			}
 		}
 	}
@@ -276,41 +300,55 @@ func run(silent bool) {
 	// 读取源目标文件
 	source_targets := lib.ReadFileToMap(filepath.Join(source_path, "domain.txt"))
 	fail_targets := lib.ReadFileToMap(filepath.Join(source_path, "faildomain.txt"))
+	bugbounty_url := lib.ReadFileToMap(filepath.Join(source_path, "bugbounty.txt"))
 
 	// 获取新增赏金目标
-	var new_hackerone_fail_targets, new_hackerone_targets, new_hackerone_url, new_bugcrowd_fail_targets, new_bugcrowd_targets, new_bugcrowd_url, new_intigriti_fail_targets, new_intigriti_targets, new_intigriti_url []string
-
+	var new_hackerone NewScope
+	var new_bugcrowd NewScope
+	var new_intigriti NewScope
 	if bountry.Config.HackerOne.Enable {
-		new_hackerone_fail_targets, new_hackerone_targets, new_hackerone_url = bountry.hackerone(source_targets, fail_targets)
+		new_hackerone = bountry.hackerone(source_targets, fail_targets)
 	}
 	if bountry.Config.Bugcrowd.Enable {
-		new_bugcrowd_fail_targets, new_bugcrowd_targets, new_bugcrowd_url = bountry.bugcrowd(source_targets, fail_targets)
+		new_bugcrowd = bountry.bugcrowd(source_targets, fail_targets)
 	}
 	if bountry.Config.Intigriti.Enable {
-		new_intigriti_fail_targets, new_intigriti_targets, new_intigriti_url = bountry.intigriti(source_targets, fail_targets)
+		new_intigriti = bountry.intigriti(source_targets, fail_targets)
 	}
 
-	var new_targets = append(append(new_hackerone_targets, new_bugcrowd_targets...), new_intigriti_targets...)
-	var new_fail_targets = append(append(new_hackerone_fail_targets, new_bugcrowd_fail_targets...), new_intigriti_fail_targets...)
+	var new_targets = append(append(new_hackerone.new_targets, new_bugcrowd.new_targets...), new_intigriti.new_targets...)
+	var new_fail_targets = append(append(new_hackerone.error_targets, new_bugcrowd.error_targets...), new_intigriti.error_targets...)
+
+	var new_bounty_urls []string
+	for _, new_url := range lib.DedupeFromList(append(append(new_hackerone.new_bounty_url, new_bugcrowd.new_bounty_url...), new_intigriti.new_bounty_url...)) {
+		if !bugbounty_url[new_url] {
+			new_bounty_urls = append(new_bounty_urls, new_url)
+		}
+	}
 
 	// 保存新增目标
 	lib.SaveTargetsToFile(filepath.Join(source_path, "domain.txt"), new_targets)
 
 	lib.SaveTargetsToFile(filepath.Join(source_path, "faildomain.txt"), new_fail_targets)
 
+	lib.SaveTargetsToFile(filepath.Join(source_path, "bugbounty.txt"), new_bounty_urls)
+
 	// 发送通知信息
 	var msg_content = notify.BountyContent{
 		Hackerone: notify.MessageContent{
-			Urls:    new_hackerone_url,
-			Targets: new_hackerone_targets,
+			Urls:    new_hackerone.new_bounty_url,
+			Targets: new_hackerone.new_targets,
+			App:     new_hackerone.new_app,
 		},
 		Bugcrowd: notify.MessageContent{
-			Urls:    new_bugcrowd_url,
-			Targets: new_bugcrowd_targets,
+			Urls:    new_bugcrowd.new_bounty_url,
+			Targets: new_bugcrowd.new_targets,
+			App:     new_bugcrowd.new_app,
 		},
 		Intigriti: notify.MessageContent{
-			Urls:    new_intigriti_url,
-			Targets: new_intigriti_targets,
+			Urls:    new_intigriti.new_bounty_url,
+			Targets: new_intigriti.new_targets,
+			App:     new_intigriti.new_app,
 		},
 	}
 

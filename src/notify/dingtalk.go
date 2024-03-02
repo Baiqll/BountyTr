@@ -48,6 +48,7 @@ func (receiver Robot) Signature() string {
 type MessageContent struct {
 	Urls    []string
 	Targets []string
+	App     []string
 }
 
 type BountyContent struct {
@@ -301,6 +302,7 @@ func TargetMarkdown(target_type string, content MessageContent) (msg_content str
 	var url_content_list []string
 
 	var target_content = strings.Join(content.Targets, "\n\n")
+	var target_app = strings.Join(content.App, "\n\n")
 
 	for _, url := range lib.DedupeFromList(content.Urls) {
 
@@ -310,7 +312,7 @@ func TargetMarkdown(target_type string, content MessageContent) (msg_content str
 
 	var url_content = strings.Join(url_content_list, "\n\n")
 
-	msg_content = fmt.Sprintf("#### %s:\n%s\n\n%s\n", target_type, target_content, url_content)
+	msg_content = fmt.Sprintf("#### %s:\n%s%s\n\n%s\n", target_type, target_content, target_app, url_content)
 
 	return
 
