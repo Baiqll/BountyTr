@@ -12,6 +12,7 @@ import (
 	"github.com/baiqll/bountytr/src/models"
 	"github.com/baiqll/bountytr/src/notify"
 	"github.com/baiqll/bountytr/src/programs"
+	"github.com/baiqll/bountytr/src/proxypool"
 )
 
 var source_path = filepath.Join(lib.HomeDir(), ".config/bountytr/")
@@ -53,6 +54,7 @@ type (
 		IntigritiTry programs.IntigritiTry
 		DingTalk     lib.DingTalk
 		Config       lib.Config
+		Pool         proxypool.Pool
 	}
 
 	NewScope struct {
@@ -73,12 +75,15 @@ func NewBountry(source_path string) *Bountry {
 	*/
 
 	config := lib.GetConfig(source_path)
+	proxy_pool := proxypool.NewProxyPool().InitPool()
+
 	return &Bountry{
-		HackeroneTry: *programs.NewHackeroneTry(config.HackerOne.Concurrency),
-		BugcrowdTry:  *programs.NewBugcrowdTry(config.Bugcrowd.Concurrency),
-		IntigritiTry: *programs.NewIntigritiTry(config.Intigriti.Concurrency),
+		HackeroneTry: *programs.NewHackeroneTry(config.HackerOne.Concurrency, proxy_pool),
+		BugcrowdTry:  *programs.NewBugcrowdTry(config.Bugcrowd.Concurrency, proxy_pool),
+		IntigritiTry: *programs.NewIntigritiTry(config.Intigriti.Concurrency, proxy_pool),
 		DingTalk:     config.DingTalk,
 		Config:       config,
+		Pool:         proxy_pool,
 	}
 }
 

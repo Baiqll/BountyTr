@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/baiqll/bountytr/src/models"
+	"github.com/baiqll/bountytr/src/proxypool"
 	"github.com/tidwall/gjson"
 	"golang.org/x/net/html"
 )
@@ -19,23 +21,42 @@ type IntigritiTry struct {
 	Url         string             `json:"url"`
 	Programs    []models.Intigriti `json:"programs"`
 	Concurrency int                `json:"nu"`
+	Pool        proxypool.Pool     `json:"pool"`
 }
 
-func NewIntigritiTry(concurrency int) *IntigritiTry {
+func NewIntigritiTry(concurrency int, pool proxypool.Pool) *IntigritiTry {
 
 	return &IntigritiTry{
 		Programs:    []models.Intigriti{},
 		Concurrency: concurrency,
+		Pool:        pool,
 	}
 }
 
-func (i IntigritiTry) ProgramRquest(url string) (body []byte, err error) {
+func (i IntigritiTry) ProgramRquest(target_url string) (body []byte, err error) {
 
-	// 请求JSON数据
-	resp, err := http.Get(url)
+	proxyUrl, _ := url.Parse(i.Pool.RandProxy())
+
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyUrl),
+	}
+
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
+
+	req, err := http.NewRequest("GET", target_url, nil)
 	if err != nil {
 		return
 	}
+
+	// 请求JSON数据
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+
 	// 读取响应体
 	body, err = ioutil.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/baiqll/bountytr/src/models"
+	"github.com/baiqll/bountytr/src/proxypool"
 	"github.com/tidwall/gjson"
 )
 
@@ -18,20 +20,29 @@ type HackeroneTry struct {
 	// Url      string             `json:"url"`
 	Programs    []models.Hackerone `json:"programs"`
 	Concurrency int                `json:"concurrency"`
+	Pool        proxypool.Pool     `json:"pool"`
 }
 
-func NewHackeroneTry(concurrency int) *HackeroneTry {
+func NewHackeroneTry(concurrency int, pool proxypool.Pool) *HackeroneTry {
 
 	return &HackeroneTry{
 		Programs:    []models.Hackerone{},
 		Concurrency: concurrency,
+		Pool:        pool,
 	}
 }
 
 func (h HackeroneTry) ProgramGraphql(data *bytes.Buffer) (body []byte, err error) {
 
+	proxyUrl, _ := url.Parse(h.Pool.RandProxy())
+
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyUrl),
+	}
+
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout:   10 * time.Second,
+		Transport: transport,
 	}
 
 	req, err := http.NewRequest("POST", "https://hackerone.com/graphql", data)

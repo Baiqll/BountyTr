@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
 	"github.com/baiqll/bountytr/src/models"
+	"github.com/baiqll/bountytr/src/proxypool"
 	"github.com/tidwall/gjson"
 )
 
@@ -16,18 +18,31 @@ type BugcrowdTry struct {
 	// Url        string            `json:"url"`
 	Programs    []models.Bugcrowd `json:"programs"`
 	Concurrency int               `json:"concurrency"`
+	Pool        proxypool.Pool    `json:"pool"`
 }
 
-func NewBugcrowdTry(concurrency int) *BugcrowdTry {
+func NewBugcrowdTry(concurrency int, pool proxypool.Pool) *BugcrowdTry {
 
 	return &BugcrowdTry{
 		// Url:        url,
 		Programs:    []models.Bugcrowd{},
 		Concurrency: concurrency,
+		Pool:        pool,
 	}
 }
 
 func (b BugcrowdTry) ProgramJson(path string) (body []byte, err error) {
+
+	proxyUrl, _ := url.Parse(b.Pool.RandProxy())
+
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyUrl),
+	}
+
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
+	}
 
 	url := "https://bugcrowd.com" + path
 
@@ -40,7 +55,8 @@ func (b BugcrowdTry) ProgramJson(path string) (body []byte, err error) {
 	req.Header.Set("Accept", "*/*")
 
 	// 发送请求
-	resp, err := http.DefaultClient.Do(req)
+	// resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return
 	}
