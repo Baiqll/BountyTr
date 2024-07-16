@@ -11,29 +11,39 @@ import (
 )
 
 type Pool struct {
+	Enable bool
 	Proxies []string
 }
 
-func NewPool(proxies []string) *Pool {
+func NewPool(proxies []string, enable bool) *Pool {
 
 	return &Pool{
 		Proxies: proxies,
+		Enable: enable,
 	}
 }
-func (p Pool) RandProxy() string {
+func (p Pool) RandProxy() (fixedURL string) {
+	/*
+		Pool.Enable 看是否使用代理
+	*/
 
-	index := rand.Intn(len(p.Proxies))
-	return p.Proxies[index]
+	if(p.Enable){
+		index := rand.Intn(len(p.Proxies))
+		fixedURL = p.Proxies[index]
+	}
+	return 
 }
 
 type ProxyPool struct {
+	Enable bool
 	Source string
 	Pool   Pool
 }
 
-func NewProxyPool() *ProxyPool {
+func NewProxyPool(enable bool) *ProxyPool {
 
 	return &ProxyPool{
+		Enable:  enable,
 		Source: "https://list.proxylistplus.com/Fresh-HTTP-Proxy-List-$",
 		// Source: "https://list.proxylistplus.com/Socks-List-$",
 	}
@@ -119,14 +129,9 @@ func (h ProxyPool) InitPool() (pool Pool) {
 		"http://60.12.168.114:9002",
 	}
 
-	// for i := 1; i <= 6; i++ {
-
-	// 	proxies = append(proxies, h.GetProxyList(i)...)
-
-	// }
-
-	h.Pool = *NewPool(proxies)
+	h.Pool = *NewPool(proxies, h.Enable)
 
 	pool = h.Pool
+
 	return
 }

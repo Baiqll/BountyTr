@@ -1,4 +1,4 @@
-package lib
+package utils
 
 import (
 	"io/ioutil"
@@ -7,19 +7,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type Private struct{
+	Enable      bool `yaml:"Enable"`
+	APIToken string  `yaml:"ApiToken"`
+	APIName string  `yaml:"ApiName"`
+
+} 
+
 type Bugcrowd struct {
-	Enable      bool `yaml:"enable"`
-	Concurrency int  `yaml:"concurrency"`
+	Enable      bool `yaml:"Enable"`
+	Concurrency int  `yaml:"Concurrency"`
+	// Private Private `yaml:"Private"`
 }
 
 type HackerOne struct {
-	Enable      bool `yaml:"enable"`
-	Concurrency int  `yaml:"concurrency"`
+	Enable      bool `yaml:"Enable"`
+	Concurrency int  `yaml:"Concurrency"`
+	Private Private `yaml:"Private"`
+
 }
 
 type Intigriti struct {
-	Enable      bool `yaml:"enable"`
-	Concurrency int  `yaml:"concurrency"`
+	Enable      bool `yaml:"Enable"`
+	Concurrency int  `yaml:"Concurrency"`
+	// Private Private `yaml:"Private"`
 }
 type DingTalk struct {
 	AppKey    string `yaml:"AppKey"`
@@ -32,6 +43,7 @@ type Config struct {
 	Intigriti Intigriti `yaml:"Intigriti"`
 	Blacklist []string  `yaml:"Black"`
 	DingTalk  DingTalk  `yaml:"DingTalk"`
+	EnableProxy bool    `yaml:"EnableProxy"`
 }
 
 func Initconfig(source_path string) (config Config) {
@@ -48,7 +60,9 @@ func Initconfig(source_path string) (config Config) {
 			".edu",
 			".json",
 			".[0-9.]+$",
+			"github.com/",
 		},
+		EnableProxy: config.EnableProxy,
 	}
 
 	data, _ := yaml.Marshal(config)

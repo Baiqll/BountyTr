@@ -1,4 +1,4 @@
-package programs
+package intigriti
 
 import (
 	"encoding/json"
@@ -11,24 +11,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/baiqll/bountytr/src/models"
-	"github.com/baiqll/bountytr/src/proxypool"
+	"github.com/baiqll/bountytr/pkg/proxypool"
+	"github.com/baiqll/bountytr/pkg/utils"
 	"github.com/tidwall/gjson"
 	"golang.org/x/net/html"
 )
 
 type IntigritiTry struct {
 	Url         string             `json:"url"`
-	Programs    []models.Intigriti `json:"programs"`
-	Concurrency int                `json:"nu"`
+	Programs    []Intigriti `json:"programs"`
+	Config      utils.Intigriti    `json:"config"`
 	Pool        proxypool.Pool     `json:"pool"`
 }
 
-func NewIntigritiTry(concurrency int, pool proxypool.Pool) *IntigritiTry {
+func NewIntigritiTry(config  utils.Intigriti , pool proxypool.Pool) *IntigritiTry {
 
 	return &IntigritiTry{
-		Programs:    []models.Intigriti{},
-		Concurrency: concurrency,
+		Programs:    []Intigriti{},
+		Config: config,
 		Pool:        pool,
 	}
 }
@@ -122,11 +122,11 @@ func (i IntigritiTry) BuildId() (tag string, err error) {
 
 }
 
-func (i IntigritiTry) Program() (programs []models.Intigriti) {
+func (i IntigritiTry) Program() (programs []Intigriti) {
 
-	var new_program []models.Intigriti
-	new_intigriti_program := make(chan models.Intigriti) // 创建缓冲通道
-	semaphore := make(chan struct{}, i.Concurrency)      //控制并发数
+	var new_program []Intigriti
+	new_intigriti_program := make(chan Intigriti) // 创建缓冲通道
+	semaphore := make(chan struct{}, i.Config.Concurrency)      //控制并发数
 
 	tag, err := i.BuildId()
 	if err != nil {
@@ -170,7 +170,7 @@ func (i IntigritiTry) Program() (programs []models.Intigriti) {
 
 }
 
-func (i IntigritiTry) Scope(intigriti models.Intigriti, new_intigriti_program chan models.Intigriti, semaphore chan struct{}, wg *sync.WaitGroup) (in_scopes []models.IntigritiScope, out_scopes []models.IntigritiScope) {
+func (i IntigritiTry) Scope(intigriti Intigriti, new_intigriti_program chan Intigriti, semaphore chan struct{}, wg *sync.WaitGroup) (in_scopes []IntigritiScope, out_scopes []IntigritiScope) {
 	/*
 		获取项目赏金目标
 	*/
@@ -198,7 +198,7 @@ func (i IntigritiTry) Scope(intigriti models.Intigriti, new_intigriti_program ch
 		domain_type := i.FindByClass(item, "domainType")
 		impact_type := i.FindByClass(item, "impact")
 
-		new_scope := models.IntigritiScope{
+		new_scope := IntigritiScope{
 			Endpoint: i.GetText(domain_endpoint[0]),
 			Impact:   i.GetText(impact_type[0]),
 			Type:     i.GetText(domain_type[0]),

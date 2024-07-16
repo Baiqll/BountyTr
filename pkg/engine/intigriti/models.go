@@ -1,4 +1,4 @@
-package models
+package intigriti
 
 type Bounty struct {
 	Value    float64 `json:"value"`

@@ -1,4 +1,4 @@
-package lib
+package utils
 
 import (
 	"bufio"
@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,7 +21,7 @@ var Blacklist = []string{
 	".edu",
 	".json",
 	".[0-9.]+$",
-	"https://github.com/",
+	"github.com",
 }
 
 func In(target string, str_array []string) bool {
@@ -56,6 +57,39 @@ func DomainMatch(url string, blacklist []string) []string {
 
 	// return dedupe_from_list(domain_rege.FindAllString(url, -1))
 	return DedupeFromList(Regexp2FindAllString(domain_rege, url))
+}
+
+func IsFile(path string) (is_file bool) {
+	// 使用os.Stat获取文件信息
+	// fmt.Println(path)
+	is_file = true
+    
+	_, err := os.Stat(path)
+	if err != nil {
+		// 如果路径不存在或有其他错误，则返回错误
+		if os.IsNotExist(err) {
+			is_file = false // 路径不存在，不是文件
+		}
+		is_file =  false // 其他错误
+	}
+
+	
+	
+	if !is_file{
+		current_dir, _ := os.Getwd()
+
+		_, err = os.Stat(filepath.Join(current_dir, path))
+		if err != nil {
+			// 如果路径不存在或有其他错误，则返回错误
+			if os.IsNotExist(err) {
+				is_file = false // 路径不存在，不是文件
+			}
+			is_file =  false // 其他错误
+		}
+
+	}
+
+	return
 }
 
 func ReadFileToMap(filename string) map[string]bool {
@@ -97,7 +131,32 @@ func ReadFileToMap(filename string) map[string]bool {
 	return hash
 }
 
-func SaveTargetsToFile(filename string, targets []string) {
+func ReadFileToList(filename string) (lines []string, err error) {
+
+	// 尝试打开文件
+	file, err := os.Open(filename)
+	if err != nil {
+		return
+	}
+	defer file.Close() // 确保在函数结束时关闭文件
+
+
+	// 创建bufio.Scanner，用于逐行读取文件
+	scanner := bufio.NewScanner(file)
+
+	// 使用Scan方法逐行读取
+	for scanner.Scan() {
+		// 将当前行添加到切片中
+		lines = append(lines, scanner.Text())
+	}
+	err = scanner.Err();
+
+
+	return
+
+}
+
+func SaveTargetsToFile(filename string, target string) {
 
 	// 保存目标到文件内
 
@@ -108,13 +167,14 @@ func SaveTargetsToFile(filename string, targets []string) {
 	defer file.Close()
 
 	writer := bufio.NewWriter(file)
-	for _, target := range targets {
-		writer.WriteString(target + "\n")
-	}
+
+	writer.WriteString(target + "\n")
+	
 	writer.Flush()
 	file.Sync()
 
 }
+
 func HomeDir() string {
 	// 获取 $home 路径
 	usr, err := user.Current()
@@ -158,4 +218,25 @@ func DomainValid(domain string) bool {
 	domainRegex := regexp.MustCompile(`(https?:\/\/)?(?:[a-zA-Z0-9*](?:(?:[a-zA-Z0-9]|-)*[a-zA-Z0-9])?\.)+(?:[a-zA-Z]{2,})([/\w?&\.=\-]+)?`)
 
 	return domainRegex.MatchString(domain)
+}
+
+func ScopeHandleClassifier(name string) (hc HandleClassifier){
+
+	if strings.Contains(name, "hackerone"){
+		handle := strings.ReplaceAll(name, "https://hackerone.com/","")
+		hc = HandleClassifier{Type: "hackerone",Handle: handle}
+	}else if strings.Contains(name, "bugcrowd"){
+		handle := strings.ReplaceAll(name, "https://bugcrowd.com/","")
+		hc =  HandleClassifier{Type: "hackerone",Handle: handle}
+	}else  if strings.Contains(name, "intigriti"){
+		//  https://app.intigriti.com/researcher/programs/xx/xx/detail
+	
+		re := regexp.MustCompile(`/programs(?=/|$)`)
+		// 在URL中查找匹配项
+		handle := re.FindString(name)
+
+		hc =  HandleClassifier{Type: "intigriti",Handle: handle}
+	}
+
+	return 
 }

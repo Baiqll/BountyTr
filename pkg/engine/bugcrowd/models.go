@@ -1,4 +1,4 @@
-package models
+package bugcrowd
 
 type BugcrowdScope struct {
 	Name        string `json:"name"`

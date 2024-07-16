@@ -1,4 +1,4 @@
-package programs
+package bugcrowd
 
 import (
 	"encoding/json"
@@ -9,24 +9,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/baiqll/bountytr/src/models"
-	"github.com/baiqll/bountytr/src/proxypool"
+	"github.com/baiqll/bountytr/pkg/proxypool"
+	"github.com/baiqll/bountytr/pkg/utils"
 	"github.com/tidwall/gjson"
 )
 
 type BugcrowdTry struct {
 	// Url        string            `json:"url"`
-	Programs    []models.Bugcrowd `json:"programs"`
-	Concurrency int               `json:"concurrency"`
+	Programs    []Bugcrowd `json:"programs"`
+	Config  	utils.Bugcrowd    `json:"config"`
 	Pool        proxypool.Pool    `json:"pool"`
 }
 
-func NewBugcrowdTry(concurrency int, pool proxypool.Pool) *BugcrowdTry {
+func NewBugcrowdTry(config utils.Bugcrowd, pool proxypool.Pool) *BugcrowdTry {
 
 	return &BugcrowdTry{
 		// Url:        url,
-		Programs:    []models.Bugcrowd{},
-		Concurrency: concurrency,
+		Programs:    []Bugcrowd{},
+		Config: config,
 		Pool:        pool,
 	}
 }
@@ -73,7 +73,7 @@ func (b BugcrowdTry) ProgramJson(path string) (body []byte, err error) {
 	return
 }
 
-func (b BugcrowdTry) ProgramPage(page int64) (total_page int64, page_program []models.Bugcrowd, err error) {
+func (b BugcrowdTry) ProgramPage(page int64) (total_page int64, page_program []Bugcrowd, err error) {
 
 	res_data, err := b.ProgramJson(fmt.Sprintf("/programs.json?vdp[]=false&page[]=%d", page))
 	if err != nil {
@@ -90,14 +90,14 @@ func (b BugcrowdTry) ProgramPage(page int64) (total_page int64, page_program []m
 
 }
 
-func (b BugcrowdTry) Program() (programs []models.Bugcrowd) {
+func (b BugcrowdTry) Program() (programs []Bugcrowd) {
 	/*
 		获取项目列表
 	*/
 
-	var new_program []models.Bugcrowd
-	new_bugcrowd_program := make(chan models.Bugcrowd) // 创建缓冲通道
-	semaphore := make(chan struct{}, b.Concurrency)    // 最高并发数
+	var new_program []Bugcrowd
+	new_bugcrowd_program := make(chan Bugcrowd) // 创建缓冲通道
+	semaphore := make(chan struct{}, b.Config.Concurrency)    // 最高并发数
 
 	// 获取第一页信息(获取总页数 total_page)
 	total_page, new_program, err := b.ProgramPage(1)
@@ -161,7 +161,7 @@ func (b BugcrowdTry) Program() (programs []models.Bugcrowd) {
 	}
 }
 
-func (b BugcrowdTry) Target(url string) (scope []models.BugcrowdScope, err error) {
+func (b BugcrowdTry) Target(url string) (scope []BugcrowdScope, err error) {
 
 	res_data, err := b.ProgramJson(url)
 	if err != nil {
@@ -179,7 +179,7 @@ func (b BugcrowdTry) Target(url string) (scope []models.BugcrowdScope, err error
 
 }
 
-func (b BugcrowdTry) Scope(bugcrowd models.Bugcrowd, new_bugcrowd_program chan models.Bugcrowd, semaphore chan struct{}, wg *sync.WaitGroup) (in_scopes []models.BugcrowdScope, out_scopes []models.BugcrowdScope) {
+func (b BugcrowdTry) Scope(bugcrowd Bugcrowd, new_bugcrowd_program chan Bugcrowd, semaphore chan struct{}, wg *sync.WaitGroup) (in_scopes []BugcrowdScope, out_scopes []BugcrowdScope) {
 	/*
 		获取项目赏金目标
 	*/

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/baiqll/bountytr/src/lib"
+	"github.com/baiqll/bountytr/pkg/utils"
 )
 
 type Dingtalker interface {
@@ -304,7 +304,7 @@ func TargetMarkdown(target_type string, content MessageContent) (msg_content str
 	var target_content = strings.Join(content.Targets, "\n\n")
 	var target_app = strings.Join(content.App, "\n\n")
 
-	for _, url := range lib.DedupeFromList(content.Urls) {
+	for _, url := range utils.DedupeFromList(content.Urls) {
 
 		url_content_list = append(url_content_list, fmt.Sprintf("[%s](%s)", url, url))
 
