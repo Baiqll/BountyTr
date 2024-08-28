@@ -5,6 +5,10 @@
 #### 安装
 
 ```shell
+   # 1.0
+   go install github.com/baiqll/bountytr@v1.1.0
+
+   # 2.0
    go install github.com/baiqll/bountytr/cmd/bountytr@latest
 ```
 
