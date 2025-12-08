@@ -1,5 +1,6 @@
 # BountyTr
 
+
 赏金目标追踪工具，自动获取 HackerOne、Bugcrowd、Intigriti 平台的赏金项目及其 scope 域名。
 
 ```

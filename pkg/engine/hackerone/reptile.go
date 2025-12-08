@@ -60,13 +60,12 @@ func (e *FastEngine) Run(output chan<- utils.NewScope) error {
 		handle_list, err  := utils.ReadFileToList(e.handle)
 		// 判断是否是列表文件
 		if err != nil{
-			program := &APIProgram{}
-			program.Attributes.Handle = strings.TrimSuffix(e.handle, "/")[strings.LastIndex(strings.TrimSuffix(e.handle, "/"), "/")+1:]
+			program := &ProgramWithScope{Handle:e.matchHandle(e.handle)}
+			
 			e.fetchProgramScopeWithData(program, output)
 		}else{
 			for _,handle := range handle_list{
-				program := &APIProgram{}
-				program.Attributes.Handle = strings.TrimSuffix(handle, "/")[strings.LastIndex(strings.TrimSuffix(handle, "/"), "/")+1:]
+				program := &ProgramWithScope{Handle:e.matchHandle(handle)}
 				e.fetchProgramScopeWithData(program, output)
 			}
 		}
@@ -259,7 +258,7 @@ func (e *FastEngine) fetchScopesAndBuildCache(programs []*APIProgram, output cha
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			programData := e.fetchProgramScopeWithData(prog, output)
+			programData := e.fetchProgramScopeWithData(&prog.Attributes, output)
 			if programData != nil {
 				mu.Lock()
 				cache = append(cache, *programData)
@@ -272,8 +271,8 @@ func (e *FastEngine) fetchScopesAndBuildCache(programs []*APIProgram, output cha
 	return cache
 }
 
-func (e *FastEngine) fetchProgramScopeWithData(prog *APIProgram, output chan<- utils.NewScope) *ProgramWithScope {
-	handle := prog.Attributes.Handle
+func (e *FastEngine) fetchProgramScopeWithData(programData *ProgramWithScope, output chan<- utils.NewScope) *ProgramWithScope {
+	handle := programData.Handle
 	url := fmt.Sprintf("https://api.hackerone.com/v1/hackers/programs/%s/structured_scopes?page[size]=100", handle)
 	cacheKey := fmt.Sprintf("h1_scope_%s", handle)
 	headers := map[string]string{"Content-Type": "application/json"}
@@ -288,8 +287,6 @@ func (e *FastEngine) fetchProgramScopeWithData(prog *APIProgram, output chan<- u
 		return nil
 	}
 
-	programData := prog.Attributes
-	programData.Handle = handle
 	programData.URL =  "https://hackerone.com/" + handle
 
 	for _, asset := range scope.Data {
@@ -317,7 +314,7 @@ func (e *FastEngine) fetchProgramScopeWithData(prog *APIProgram, output chan<- u
 		return nil
 	}
 
-	return &programData
+	return programData
 }
 
 // cleanDomain 清理域名
@@ -400,3 +397,13 @@ func (e *FastEngine) outputFromCache(cache []ProgramWithScope, output chan<- uti
 	}
 }
 
+func (e *FastEngine) matchHandle(handle string) string {
+	// 标准化输入
+	url := strings.TrimPrefix(handle, "https://")
+	url = strings.TrimPrefix(url, "http://")
+	url = strings.TrimPrefix(url, "hackerone.com/")
+	
+	// 返回第一个路径段
+	return strings.Split(url, "/")[0]
+}
+	
