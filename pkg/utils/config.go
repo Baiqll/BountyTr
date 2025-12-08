@@ -15,22 +15,18 @@ type Private struct{
 } 
 
 type Bugcrowd struct {
-	Enable      bool `yaml:"Enable"`
-	Concurrency int  `yaml:"Concurrency"`
-	// Private Private `yaml:"Private"`
+	Enable bool `yaml:"Enable"`
+	Private Private `yaml:"Private"`
 }
 
 type HackerOne struct {
-	Enable      bool `yaml:"Enable"`
-	Concurrency int  `yaml:"Concurrency"`
+	Enable  bool    `yaml:"Enable"`
 	Private Private `yaml:"Private"`
-
 }
 
 type Intigriti struct {
-	Enable      bool `yaml:"Enable"`
-	Concurrency int  `yaml:"Concurrency"`
-	// Private Private `yaml:"Private"`
+	Enable bool `yaml:"Enable"`
+	Private Private `yaml:"Private"`
 }
 type DingTalk struct {
 	AppKey    string `yaml:"AppKey"`
@@ -43,14 +39,13 @@ type Config struct {
 	Intigriti Intigriti `yaml:"Intigriti"`
 	Blacklist []string  `yaml:"Black"`
 	DingTalk  DingTalk  `yaml:"DingTalk"`
-	EnableProxy bool    `yaml:"EnableProxy"`
 }
 
 func Initconfig(source_path string) (config Config) {
 	config = Config{
-		HackerOne: HackerOne{Enable: true, Concurrency: 200},
-		Bugcrowd:  Bugcrowd{Enable: true, Concurrency: 15},
-		Intigriti: Intigriti{Enable: true, Concurrency: 50},
+		HackerOne: HackerOne{Enable: true},
+		Bugcrowd:  Bugcrowd{Enable: true},
+		Intigriti: Intigriti{Enable: true},
 		DingTalk: DingTalk{
 			AppKey:    "",
 			AppSecret: "",
@@ -62,7 +57,6 @@ func Initconfig(source_path string) (config Config) {
 			".[0-9.]+$",
 			"github.com/",
 		},
-		EnableProxy: config.EnableProxy,
 	}
 
 	data, _ := yaml.Marshal(config)

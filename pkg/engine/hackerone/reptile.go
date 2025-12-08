@@ -3,274 +3,400 @@ package hackerone
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"io/ioutil"
-	"net/http"
-	"net/url"
+	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/baiqll/bountytr/pkg/proxypool"
 	"github.com/baiqll/bountytr/pkg/utils"
 )
 
-type HackeroneTry struct {
-	// Url      string             `json:"url"`
-	Programs    []ProgramsScope `json:"programs"`
-	Config 		utils.HackerOne    `json:"config"`
-	Pool        proxypool.Pool     `json:"pool"`
+// FastEngine HackerOne快速引擎
+type FastEngine struct {
+	cacheDir    string
+	config      utils.HackerOne
+	handle      string
+	silent      bool
+	client      *utils.HttpClient
+	concurrency int
+	// cache
+	githubCacheCount  int
 }
 
-func NewHackeroneTry(config utils.HackerOne, pool proxypool.Pool) *HackeroneTry {
 
-	return &HackeroneTry{
-		Programs:    []ProgramsScope{},
-		Config: config,
-		Pool:        pool,
+// NewFastEngine 创建快速引擎
+func NewFastEngine(cacheDir string, config utils.HackerOne,handle string, silent bool) *FastEngine {
+	ratePerMinute := 400
+	concurrency := 50
+	if !config.Private.Enable {
+		ratePerMinute = 50
+		concurrency = 10
+	}
+
+	var client *utils.HttpClient
+	if config.Private.Enable {
+		client = utils.NewHttpClientWithAuth(cacheDir, ratePerMinute, config.Private.APIName, config.Private.APIToken)
+	} else {
+		client = utils.NewHttpClient(cacheDir, ratePerMinute)
+	}
+
+	return &FastEngine{
+		cacheDir:    cacheDir,
+		handle:		 handle,
+		config:      config,
+		silent:      silent,
+		client:      client,
+		concurrency: concurrency,
 	}
 }
 
-func (h HackeroneTry) ProgramRquest(link string) (body []byte, err error) {
-	/*
-		hackerone 请求体
-	*/
+// Public项目（GitHub、API） +   Private项目（API）
+func (e *FastEngine) Run(output chan<- utils.NewScope) error {
 
-	proxyUrl, _ := url.Parse(h.Pool.RandProxy())
-
-	transport := http.Transport{
-		Proxy: func(*http.Request) (*url.URL, error) {
-			if proxyUrl.Host == ""{
-				return nil, nil // 总是返回 nil，不使用代理
-			}
-			return proxyUrl, nil
-		},
-	}
-
-	client := &http.Client{
-		// Timeout:   10 * time.Second,
-		Transport: &transport,
-	}
-
-	req, err := http.NewRequest("GET", link, nil)
-	if err != nil {
-		return
-	}
-
-	// 设置token 
-	req.SetBasicAuth(h.Config.Private.APIName, h.Config.Private.APIToken)
-
-	// 设置请求头
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-
-	// 读取响应体
-	body, err = ioutil.ReadAll(resp.Body)
-
-	return
-}
-
-func (h HackeroneTry) ProgramsScope(new_hackerone chan utils.NewScope) {
-	/*
-		获取项目列表
-	*/
-	var wg sync.WaitGroup
-
-	// new_programs_scope := make(chan ProgramsScope) // 创建缓冲通道
-
-	link := "https://api.hackerone.com/v1/hackers/programs?page[size]=100"
-	
-	programsDatas := h.GetPrograms(link)
-
-	wg.Add(len(programsDatas))
-
-	/*
-		public_mode 公共项目
-		soft_launched 私人项目
-	*/
-
-
-	for _, data := range programsDatas {
-
-		if data.Attributes.State == "soft_launched"{
-			new_hackerone <- utils.NewScope{NewPrivateURL: "https://hackerone.com/" + data.Attributes.Handle}
+	if e.handle != "" {
+		handle_list, err  := utils.ReadFileToList(e.handle)
+		// 判断是否是列表文件
+		if err != nil{
+			program := &APIProgram{}
+			program.Attributes.Handle = strings.TrimSuffix(e.handle, "/")[strings.LastIndex(strings.TrimSuffix(e.handle, "/"), "/")+1:]
+			e.fetchProgramScopeWithData(program, output)
 		}else{
-			new_hackerone <- utils.NewScope{NewPublicURL: "https://hackerone.com/" + data.Attributes.Handle}
+			for _,handle := range handle_list{
+				program := &APIProgram{}
+				program.Attributes.Handle = strings.TrimSuffix(handle, "/")[strings.LastIndex(strings.TrimSuffix(handle, "/"), "/")+1:]
+				e.fetchProgramScopeWithData(program, output)
+			}
 		}
-
 		
+		return nil
+	}
 
-		go h.GetScope(data.Attributes.Handle, new_hackerone, &wg)
+	// 从GitHub平台获取数据
+	if err := e.RunGithubPublic(output); err != nil {
+		return err
+	}
 
-		numGoroutines := runtime.NumGoroutine()
-
-		if numGoroutines > h.Config.Concurrency {
-			time.Sleep(3 * time.Second)
+	// 从hackerone平台获取数据
+	if e.config.Private.Enable {
+		if err := e.RunAPI(output); err != nil {
+			return err
 		}
-
 	}
-
-	go func() {
-		wg.Wait()
-	}()
-
+	return nil
 }
 
-func (h HackeroneTry) GetPrograms(link string) (programsData []*ProgramsData) {
+// Public 获取公开项目（从GitHub）
+func (e *FastEngine) RunGithubPublic(output chan<- utils.NewScope) error {
+	// GitHub数据URL
+	const GitHubDataURL = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/hackerone_data.json"
 
-	/*
-		获取所有项目
-	*/
-
-	if link == "nil"{
-		return
-	}
-
-	var new_programs Programs
-	
-	res_data, err := h.ProgramRquest(link)
+	data, err := e.client.FetchWithCache(GitHubDataURL, "hackerone_data.json", 1*time.Hour, e.silent)
 	if err != nil {
-		fmt.Println("hackerone Program 请求失败", err)
-		return
+		return err
 	}
 
-	err = json.Unmarshal([]byte(res_data), &new_programs)
-
-	if err != nil {
-		fmt.Println("hackerone Program 请求失败",err)
-	}
-	if new_programs.Links == nil || new_programs.Data == nil{
-		
-		return
+	var programs []ProgramWithScope
+	if err := json.Unmarshal(data, &programs); err != nil {
+		return err
 	}
 
-	programsData = append(programsData, new_programs.Data...)
+	var new_programs []ProgramWithScope
 
-	if new_programs.Links.Next != ""{
+	for _, p := range programs {
+		output <- utils.NewScope{NewPublicURL: p.URL}
 
-		new_programs_data := h.GetPrograms(new_programs.Links.Next)
-
-		programsData = append(programsData, new_programs_data...)
-	
-	}
-
-	return
-	
-}
-
-
-func (h HackeroneTry) GetScope(handle string, new_hackerone chan utils.NewScope, wg *sync.WaitGroup) {
-	/*
-		获取项目赏金目标
-	*/
-	defer wg.Done()
-	
-	link := fmt.Sprintf("https://api.hackerone.com/v1/hackers/programs/%s/structured_scopes?page[size]=100", handle)
-
-	var scope Scope
-
-	res_data, err := h.ProgramRquest(link)
-	if err != nil {
-		fmt.Println("hackerone Scope 获取失败", err)
-	
-		return
-	}
-
-	err = json.Unmarshal([]byte(res_data), &scope)
-	if err != nil {
-		fmt.Println("hackerone Scope 解析失败", string(res_data))
-
-		return
-	}
-
-	h.ProcessScope(scope, new_hackerone)
-
-}
-
-
-func  (h HackeroneTry) ProcessScope(scope Scope, new_hackerone chan utils.NewScope){
-
-
-	for _, asset := range scope.Data {
-
-		scope_attr := asset.Attributes
-		
-		if !asset.Attributes.EligibleForBounty {
-			// Skip out of scope
+		if p.SubmissionState != "open" || !p.OffersBounties || p.Targets.InScope == nil {
 			continue
 		}
 
-		identifier := scope_attr.Identifier
-		assetType := scope_attr.AssetType
+		new_programs = append(new_programs,p)
 
-		if utils.In(assetType,[]string{"DOMAIN","URL","WILDCARD"}){
-
-			h.HandleDomainIdentifier(identifier, new_hackerone)
-
-		} else if  assetType == "OTHER" {
-			if strings.HasPrefix(identifier, "*")|| strings.HasSuffix(identifier, "*") {
-				h.HandleDomainIdentifier(identifier, new_hackerone)
+		for _, target := range p.Targets.InScope {
+			if utils.In(target.AssetType, []string{"DOMAIN", "URL", "WILDCARD"}) {
+				e.handleDomainIdentifier(target.AssetIdentifier, output)
+			} else if target.AssetType == "OTHER" {
+				if strings.HasPrefix(target.AssetIdentifier, "*") || strings.HasSuffix(target.AssetIdentifier, "*") {
+					e.handleDomainIdentifier(target.AssetIdentifier, output)
+				} else {
+					e.handleAsset(target.AssetIdentifier, output)
+				}
 			} else {
-				h.HandleAsset(identifier, new_hackerone)
+				e.handleAsset(target.AssetIdentifier, output)
 			}
-		}else {
-			h.HandleAsset(identifier, new_hackerone)
 		}
+	}
+	// 更新 GitHub 数据
+	cachePath := filepath.Join(e.cacheDir, "hackerone_data.json")
+	e.saveCache(cachePath, new_programs)
+	e.githubCacheCount = len(new_programs)
 
+	if !e.silent {
+		fmt.Printf("[*] HackerOne public 项目 %d 个\n", len(new_programs))
 	}
 
+	return nil
 }
 
-func (h HackeroneTry) CleanDomain(domain string) string {
-
-	pattern := `[\w]+[\w\-_~\.]+\.[a-zA-Z]+|$`
-	// pattern := `[\w]+[\w\-_~\.]*\.[a-zA-Z]+(\/[\w\-_~\.]+)*`
-	r, err := regexp.Compile(pattern)
-	if err != nil {
-		// Whatever happened, just return the original domain
-		return domain
+// Public + Private 获公共+私有项目（从API）
+func (e *FastEngine) RunAPI(output chan<- utils.NewScope) error {
+	
+	if !e.config.Private.Enable {
+		return nil
 	}
 
+	privateCachePath := filepath.Join(e.cacheDir, "hackerone_private_data.json")
+	publicCachePath := filepath.Join(e.cacheDir, "hackerone_public_data.json")
+
+	// 尝试从缓存加载
+	if cached_programs, ok := e.loadCache(privateCachePath, 1*time.Hour); ok {
+		if !e.silent {
+			fmt.Printf("[*] HackerOne private 项目 %d 个 (缓存)\n", len(cached_programs))
+		}
+		e.outputFromCache(cached_programs, output)
+		return nil
+	}
+
+	if !e.silent {
+		fmt.Println("[*] HackerOne API 获取项目列表...")
+	}
+
+	publicPrograms, privatePrograms, err := e.fetchAllPrograms()
+	if err != nil {
+		return err
+	}
+
+	// 检查 public 项目数是否与 GitHub 数据一致
+	// 数据不一致时 再详细对
+	if len(publicPrograms) > 0 && len(publicPrograms) > e.githubCacheCount {
+		newCount := len(publicPrograms) - e.githubCacheCount
+		if !e.silent {
+			fmt.Printf("[*] HackerOne public 项目新增 %d 个，获取scope中...\n", newCount)
+		}
+		publicCache := e.fetchScopesAndBuildCache(publicPrograms, output)
+		e.saveCache(publicCachePath, publicCache)
+	}
+
+	// 缓存 private 项目
+	if len(privatePrograms) > 0 {
+		if !e.silent {
+			fmt.Printf("[*] HackerOne private 项目 获取scope中...\n")
+		}
+		privateCache := e.fetchScopesAndBuildCache(privatePrograms, output)
+		e.saveCache(privateCachePath, privateCache)
+	}
+
+	if !e.silent {
+		fmt.Println("[*] HackerOne API 完成")
+	}
+	return nil
+}
+
+
+func (e *FastEngine) fetchAllPrograms() (publicPrograms, privatePrograms []*APIProgram, err error) {
+	var pageCount int
+
+	url := "https://api.hackerone.com/v1/hackers/programs?page[size]=100"
+
+	for url != "" {
+		pageCount++
+		cacheKey := fmt.Sprintf("h1_api_page_%d", pageCount)
+		headers := map[string]string{"Content-Type": "application/json"}
+
+		data, _, err := e.client.GetWithCache(url, cacheKey, headers, 15*time.Minute)
+		if err != nil && len(data) == 0 {
+			return publicPrograms, privatePrograms, err
+		}
+
+		var resp APIResponse
+		if err := json.Unmarshal(data, &resp); err != nil {
+			break
+		}
+
+		for _, p := range resp.Data {
+			// 只要 submission_state 为 open 的项目
+			if p.Attributes.SubmissionState != "open" || !p.Attributes.OffersBounties {
+				continue
+			}
+			if p.Attributes.State == "soft_launched" {
+				privatePrograms = append(privatePrograms, p)
+			} else if p.Attributes.State == "public_mode" {
+				publicPrograms = append(publicPrograms, p)
+			}
+		}
+
+		url = resp.Links.Next
+	}
+
+	if !e.silent {
+		fmt.Printf("[*] HackerOne API: public %d 个, private %d 个\n", len(publicPrograms), len(privatePrograms))
+	}
+
+	return publicPrograms, privatePrograms, nil
+}
+
+func (e *FastEngine) fetchScopesAndBuildCache(programs []*APIProgram, output chan<- utils.NewScope) []ProgramWithScope {
+	cache := make([]ProgramWithScope, 0, len(programs))
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, e.concurrency)
+
+	for _, p := range programs {
+		// 根据状态输出不同的URL类型
+		if p.Attributes.State == "soft_launched" {
+			output <- utils.NewScope{NewPrivateURL: "https://hackerone.com/" + p.Attributes.Handle}
+		} else {
+			// public_mode 项目来自 API，标记为 IsFromAPI
+			output <- utils.NewScope{NewPublicURL: "https://hackerone.com/" + p.Attributes.Handle, IsFromAPI: true}
+		}
+
+		wg.Add(1)
+		go func(prog *APIProgram) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			programData := e.fetchProgramScopeWithData(prog, output)
+			if programData != nil {
+				mu.Lock()
+				cache = append(cache, *programData)
+				mu.Unlock()
+			}
+		}(p)
+	}
+
+	wg.Wait()
+	return cache
+}
+
+func (e *FastEngine) fetchProgramScopeWithData(prog *APIProgram, output chan<- utils.NewScope) *ProgramWithScope {
+	handle := prog.Attributes.Handle
+	url := fmt.Sprintf("https://api.hackerone.com/v1/hackers/programs/%s/structured_scopes?page[size]=100", handle)
+	cacheKey := fmt.Sprintf("h1_scope_%s", handle)
+	headers := map[string]string{"Content-Type": "application/json"}
+
+	data, _, err := e.client.GetWithCache(url, cacheKey, headers, 1*time.Hour)
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+
+	var scope APIScope
+	if err := json.Unmarshal(data, &scope); err != nil {
+		return nil
+	}
+
+	programData := prog.Attributes
+	programData.Handle = handle
+	programData.URL =  "https://hackerone.com/" + handle
+
+	for _, asset := range scope.Data {
+		if !asset.Attributes.EligibleForBounty {
+			continue
+		}
+
+		target := asset.Attributes
+		
+		programData.Targets.InScope = append(programData.Targets.InScope, target)
+
+		if utils.In(target.AssetType, []string{"DOMAIN", "URL", "WILDCARD"}){
+			e.handleDomainIdentifier(target.AssetIdentifier, output)
+		} else if target.AssetType == "OTHER" {
+			if strings.HasPrefix(target.AssetIdentifier, "*") || strings.HasSuffix(target.AssetIdentifier, "*") {
+				e.handleDomainIdentifier(target.AssetIdentifier, output)
+			} else {
+				e.handleAsset(target.AssetIdentifier, output)
+			}
+		} else {
+			e.handleAsset(target.AssetIdentifier, output)
+		} 
+	}
+	if programData.Targets.InScope == nil {
+		return nil
+	}
+
+	return &programData
+}
+
+// cleanDomain 清理域名
+func (e *FastEngine) cleanDomain(domain string) string {
+	pattern := `[\w]+[\w\-_~\.]+\.[a-zA-Z]+`
+	r, err := regexp.Compile(pattern)
+	if err != nil {
+		return domain
+	}
 	cDomain := r.FindString(domain)
 	if cDomain != "" {
 		return cDomain
 	}
-	return domain
+	return ""
 }
 
-func  (h HackeroneTry) DomainSplitTrimSpace(domain string) []string {
-	domainSlice := strings.Split(domain, ",")
-	for i := range domainSlice {
-		domainSlice[i] = strings.TrimSpace(domainSlice[i])
-	}
-
-	return domainSlice
-}
-
-func (h HackeroneTry) HandleAsset(identifier string, new_hackerone chan utils.NewScope) {
-	domainsSlice := h.DomainSplitTrimSpace(identifier)
-	for _, identifier := range domainsSlice {
-		
-		new_hackerone <- utils.NewScope{NewApp: identifier}
-		
+// handleDomainIdentifier 处理域名类型的标识符
+func (e *FastEngine) handleDomainIdentifier(identifier string, output chan<- utils.NewScope) {
+	identifier = e.cleanDomain(identifier)
+	for _, domain := range strings.Split(identifier, ",") {
+		domain = strings.TrimSpace(domain)
+		if domain != "" {
+			output <- utils.NewScope{NewTarget: domain}
+		}
 	}
 }
 
-func (h HackeroneTry) HandleDomainIdentifier(identifier string, new_hackerone chan utils.NewScope){
+// handleAsset 处理非域名类型的资产
+func (e *FastEngine) handleAsset(identifier string, output chan<- utils.NewScope) {
+	for _, asset := range strings.Split(identifier, ",") {
+		asset = strings.TrimSpace(asset)
+		if asset != "" {
+			output <- utils.NewScope{NewApp: asset}
+		}
+	}
+}
 
-	identifier = h.CleanDomain(identifier)
-	domainsSlice := h.DomainSplitTrimSpace(identifier)
-	for _, identifier := range domainsSlice {
-		
-		new_hackerone <- utils.NewScope{NewTarget: identifier}
+func (e *FastEngine) loadCache(path string, maxAge time.Duration) ([]ProgramWithScope, bool) {
 	
+	if info, err := os.Stat(path); err == nil {
+		if time.Since(info.ModTime()) < maxAge {
+			data, err := ioutil.ReadFile(path)
+			if err != nil {
+				return nil, false
+			}
+
+			var programs []ProgramWithScope
+			if err := json.Unmarshal(data, &programs); err != nil {
+				return nil , false
+			}
+
+			return programs, true
+		}
 	}
+
+	return nil , false
 
 }
 
+func (e *FastEngine) saveCache(path string, cache interface{}) {
+	data, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		return
+	}
+	ioutil.WriteFile(path, data, 0644)
+}
+
+
+func (e *FastEngine) outputFromCache(cache []ProgramWithScope, output chan<- utils.NewScope) {
+	for _, p := range cache {
+		output <- utils.NewScope{NewPrivateURL: p.URL}
+
+		for _, target := range p.Targets.InScope {
+			if utils.In(target.AssetType, []string{"DOMAIN", "URL", "WILDCARD"}) {
+				output <- utils.NewScope{NewTarget: target.AssetIdentifier}
+			} else {
+				output <- utils.NewScope{NewApp: target.AssetIdentifier}
+			}
+		}
+	}
+}
 

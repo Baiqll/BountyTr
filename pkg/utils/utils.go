@@ -3,7 +3,6 @@ package utils
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -12,8 +11,6 @@ import (
 	"strings"
 
 	"github.com/dlclark/regexp2"
-	"github.com/edsrzf/mmap-go"
-	"golang.org/x/sys/unix"
 )
 
 var Blacklist = []string{
@@ -94,47 +91,33 @@ func IsFile(path string) (is_file bool) {
 
 func ReadFileToMap(filename string) map[string]bool {
 	// 读取文件到 map
+	hash := make(map[string]bool)
 
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
-		log.Fatal(err)
+		return hash
 	}
 	defer file.Close()
 
-	info, err := file.Stat()
-	if err != nil {
-		log.Fatal(err)
-	}
-	size := info.Size()
-
-	if size == 0 {
-		if _, err := file.WriteString("\n"); err != nil {
-			log.Fatal(err)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			hash[line] = true
 		}
 	}
 
-	hash := make(map[string]bool)
-	reader := bufio.NewReader(file)
-	mm, err := mmap.Map(file, unix.PROT_READ, 0)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer mm.Unmap()
-
-	for i := 0; int64(i) < size; i++ {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		hash[strings.Replace(line, "\n", "", -1)] = true
-	}
 	return hash
 }
 
 func ReadFileToList(filename string) (lines []string, err error) {
 
+	re := regexp.MustCompile(`^~`)
+
+	path := re.ReplaceAllString(filename, HomeDir())
+
 	// 尝试打开文件
-	file, err := os.Open(filename)
+	file, err := os.Open(path)
 	if err != nil {
 		return
 	}
@@ -157,29 +140,25 @@ func ReadFileToList(filename string) (lines []string, err error) {
 }
 
 func SaveTargetsToFile(filename string, target string) {
-
 	// 保存目标到文件内
-
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Printf("[-] 保存文件失败: %v\n", err)
+		return
 	}
 	defer file.Close()
 
 	writer := bufio.NewWriter(file)
-
 	writer.WriteString(target + "\n")
-	
 	writer.Flush()
 	file.Sync()
-
 }
 
 func HomeDir() string {
 	// 获取 $home 路径
 	usr, err := user.Current()
 	if err != nil {
-		fmt.Println("Could not get user home directory:", err)
+		fmt.Println("[-] Could not get user home directory:", err)
 	}
 	return usr.HomeDir
 }

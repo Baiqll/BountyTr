@@ -283,7 +283,7 @@ func SendRequest(webhook string, params []byte) {
 	reader := bytes.NewReader(params)
 	request, err := http.NewRequest("POST", webhook, reader)
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Println("[-]", err.Error())
 		return
 	}
 	// 设置请求头及代理
