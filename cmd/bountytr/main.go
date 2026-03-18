@@ -57,7 +57,6 @@ func NewBountry(source_path string) *Bountry {
 	}
 }
 
-
 func main() {
 	var banner = `
 
@@ -106,7 +105,6 @@ func main() {
 	}
 }
 
-
 func run(silent bool, handle string) {
 	if !silent {
 		now := time.Now().Format("2006-01-02 15:04:05")
@@ -121,12 +119,12 @@ func run(silent bool, handle string) {
 	// 清空 bugbounty 文件，每次运行重新写入
 	publicFile := filepath.Join(source_path, "bugbounty-public.txt")
 	privateFile := filepath.Join(source_path, "bugbounty-private.txt")
-	
+
 	if handle == "" {
 		os.Truncate(publicFile, 0)
 		os.Truncate(privateFile, 0)
 	}
-	
+
 	source_bugbounty_url := make(map[string]bool)
 	private_bugbounty_url := make(map[string]bool)
 
@@ -149,7 +147,7 @@ func run(silent bool, handle string) {
 				}
 				continue
 			}
-			
+
 			if scope.NewTarget != "" && !source_targets[scope.NewTarget] {
 				if !black_re.MatchString(scope.NewTarget) {
 					fmt.Println(scope.NewTarget)
@@ -190,48 +188,63 @@ func run(silent bool, handle string) {
 }
 
 // runFull 完整模式 - 公开数据 + 私有项目
-func runFull(cacheDir string, config utils.Config, silent bool,handle string, output chan<- utils.NewScope) {
-	
+func runFull(cacheDir string, config utils.Config, silent bool, handle string, output chan<- utils.NewScope) {
+	if handle != "" {
+		handle_list, err := utils.ReadFileToList(handle)
+		if err != nil {
+			runPlatform(cacheDir, config, handle, silent, output, detectPlatform(handle))
+		} else {
+			for _, h := range handle_list {
+				runPlatform(cacheDir, config, h, silent, output, detectPlatform(h))
+			}
+		}
+		return
+	} else {
+		runPlatform(cacheDir, config, handle, silent, output, "")
+	}
+
+}
+
+func runPlatform(cacheDir string, config utils.Config, handle string, silent bool, output chan<- utils.NewScope, platform string) {
 	var wg sync.WaitGroup
 
-	if config.HackerOne.Enable {
-		// HackerOne 项目
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			hackerone_engine := hackerone.NewFastEngine(cacheDir, config.HackerOne, handle, silent)
-			if err := hackerone_engine.Run(output); err != nil && !silent {
-				fmt.Printf("[-] HackerOne 错误: %v\n", err)
-			}
-		}()
+	trimmedHandle := strings.TrimSpace(handle)
 
+	if config.HackerOne.Enable || platform == "hackerone" {
+		engine := hackerone.NewFastEngine(cacheDir, config.HackerOne, trimmedHandle, silent)
+		if err := engine.Run(output); err != nil && !silent {
+			fmt.Printf("[-] HackerOne 错误: %v\n", err)
+		}
 	}
 
-	if config.Bugcrowd.Enable {
-		// Bugcrowd 项目
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			bugcrowd_engine := bugcrowd.NewFastEngine(cacheDir, config.Bugcrowd, handle, silent)
-			if err := bugcrowd_engine.Run(output); err != nil && !silent {
-				fmt.Printf("[-] Bugcrowd 错误: %v\n", err)
-			}
-		}()
+	if config.Bugcrowd.Enable || platform == "bugcrowd" {
+		engine := bugcrowd.NewFastEngine(cacheDir, config.Bugcrowd, trimmedHandle, silent)
+		if err := engine.Run(output); err != nil && !silent {
+			fmt.Printf("[-] Bugcrowd 错误: %v\n", err)
+		}
 	}
 
-	if config.Intigriti.Enable {
-		// Intigriti 项目
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			intigriti_engine := intigriti.NewFastEngine(cacheDir, config.Intigriti, handle, silent)
-			if err := intigriti_engine.Run(output); err != nil && !silent {
-				fmt.Printf("[-] Intigriti 错误: %v\n", err)
-			}
-		}()
+	if config.Intigriti.Enable || platform == "intigriti" {
+		engine := intigriti.NewFastEngine(cacheDir, config.Intigriti, trimmedHandle, silent)
+		if err := engine.Run(output); err != nil && !silent {
+			fmt.Printf("[-] Intigriti 错误: %v\n", err)
+		}
 	}
 
 	wg.Wait()
+}
+
+func detectPlatform(handle string) string {
+	if strings.Contains(handle, "hackerone.com") {
+		return "hackerone"
+	}
+	if strings.Contains(handle, "bugcrowd.com") {
+		return "bugcrowd"
+	}
+	if strings.Contains(handle, "intigriti.com") {
+		return "intigriti"
+	}
+	return ""
 }
 
 func (bountry Bountry) SendDingtalk(content notify.BountyContent) {

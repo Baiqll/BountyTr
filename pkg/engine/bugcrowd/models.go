@@ -1,5 +1,34 @@
 package bugcrowd
 
+type APIResponse struct {
+	Engagements []APIProgram `json:"engagements"`
+	Links       struct {
+		Next string `json:"next"`
+	} `json:"links"`
+}
+
+type APIProgram struct {
+	Name       string `json:"name"`
+	BriefURL   string `json:"briefUrl"`
+	IsPrivate  bool   `json:"isPrivate"`
+}
+
+type APITarget struct {
+	UUID     string `json:"uuid"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	URI      string `json:"uri"`
+}
+
+type ProgramWithScope struct {
+	Handle string `json:"handle"`
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Targets struct {
+		InScope []APITarget `json:"in_scope"`
+	} `json:"targets"`
+}
+
 type BugcrowdScope struct {
 	Name        string `json:"name"`
 	Category    string `json:"category"`

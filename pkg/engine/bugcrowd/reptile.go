@@ -3,10 +3,11 @@ package bugcrowd
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"io/ioutil"
-	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,29 +17,38 @@ import (
 
 // FastEngine Bugcrowd快速引擎
 type FastEngine struct {
-	cacheDir string
-	config   utils.Bugcrowd
-	handle   string
-	silent   bool
-	client   *utils.HttpClient
+	cacheDir         string
+	config           utils.Bugcrowd
+	handle           string
+	silent           bool
+	client           *utils.HttpClient
+	concurrency      int
+	githubCacheCount int
 }
 
 // NewFastEngine 创建快速引擎
-func NewFastEngine(cacheDir string, config utils.Bugcrowd,handle string, silent bool) *FastEngine {
-	
+func NewFastEngine(cacheDir string, config utils.Bugcrowd, handle string, silent bool) *FastEngine {
+	ratePerMinute := 400
+	concurrency := 50
+	if !config.Private.Enable {
+		ratePerMinute = 50
+		concurrency = 10
+	}
+
 	var client *utils.HttpClient
 	if config.Private.Enable {
-		client = utils.NewHttpClientWithAuth(cacheDir, 400, config.Private.APIName, config.Private.APIToken)
+		client = utils.NewHttpClientWithAuth(cacheDir, ratePerMinute, config.Private.APIName, config.Private.APIToken)
 	} else {
-		client = utils.NewHttpClient(cacheDir, 400)
+		client = utils.NewHttpClient(cacheDir, ratePerMinute)
 	}
 
 	return &FastEngine{
-		cacheDir: cacheDir,
-		config:   config,
-		handle:    handle,
-		silent:   silent,
-		client:   client,
+		cacheDir:    cacheDir,
+		config:      config,
+		handle:      handle,
+		silent:      silent,
+		client:      client,
+		concurrency: concurrency,
 	}
 }
 
@@ -58,16 +68,10 @@ type GitHubData struct {
 func (e *FastEngine) Run(output chan<- utils.NewScope) error {
 
 	if e.handle != "" {
-		// handle_list, err  := utils.ReadFileToList(e.handle)
-		// 判断是否是列表文件
-		// if err != nil{
-		// 	return nil
-		// }else{
-		// 	for _,handle := range handle_list{
-		// 		return nil
-		// 	}
-		// }
-		
+		program := &ProgramWithScope{Handle: "engagements/" + e.matchHandle(e.handle)}
+
+		e.fetchProgramScopeWithData(program, output)
+
 		return nil
 	}
 
@@ -76,7 +80,7 @@ func (e *FastEngine) Run(output chan<- utils.NewScope) error {
 		return err
 	}
 
-	// 从hackerone平台获取数据
+	// 从Bugcrowd平台获取数据
 	if e.config.Private.Enable {
 		if err := e.RunAPI(output); err != nil {
 			return err
@@ -87,8 +91,6 @@ func (e *FastEngine) Run(output chan<- utils.NewScope) error {
 
 // Public 获取公开项目（从GitHub）
 func (e *FastEngine) RunGithubPublic(output chan<- utils.NewScope) error {
-	
-	// GitHub数据URL
 	const GitHubDataURL = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/bugcrowd_data.json"
 
 	data, err := e.client.FetchWithCache(GitHubDataURL, "bugcrowd_data.json", 1*time.Hour, e.silent)
@@ -101,19 +103,11 @@ func (e *FastEngine) RunGithubPublic(output chan<- utils.NewScope) error {
 		return err
 	}
 
-	if !e.silent {
-		fmt.Printf("[*] Bugcrowd 共 %d 个项目\n", len(programs))
-	}
+	e.githubCacheCount = len(programs)
 
 	for _, p := range programs {
 		output <- utils.NewScope{NewPublicURL: p.URL}
 		for _, target := range p.Targets.InScope {
-			// if utils.In(target.Type, []string{"website", "api"}) {
-			// 	output <- utils.NewScope{NewTarget: e.cleanDomain(target.Target)}
-			// } else {
-			// 	output <- utils.NewScope{NewApp: e.cleanDomain(target.Target)}
-			// }
-
 			if utils.In(target.Type, []string{"website", "api"}) {
 				e.handleDomainIdentifier(target.Target, output)
 			} else {
@@ -125,11 +119,52 @@ func (e *FastEngine) RunGithubPublic(output chan<- utils.NewScope) error {
 			}
 		}
 	}
+
+	if !e.silent {
+		fmt.Printf("[*] Bugcrowd public 项目 %d 个\n", len(programs))
+	}
+
 	return nil
 }
 
-// RunPrivate 获取私有项目（暂未实现）
+// Public + Private 获公共+私有项目（从API）
 func (e *FastEngine) RunAPI(output chan<- utils.NewScope) error {
+	if !e.config.Private.Enable {
+		return nil
+	}
+
+	privateCachePath := filepath.Join(e.cacheDir, "bugcrowd_private_data.json")
+
+	// 尝试从缓存加载
+	if cached_programs, ok := e.loadCache(privateCachePath, 1*time.Hour); ok {
+		if !e.silent {
+			fmt.Printf("[*] Bugcrowd private 项目 %d 个 (缓存)\n", len(cached_programs))
+		}
+		e.outputFromCache(cached_programs, output)
+		return nil
+	}
+
+	if !e.silent {
+		fmt.Println("[*] Bugcrowd API 获取项目列表...")
+	}
+
+	privatePrograms, err := e.fetchAllPrograms()
+	if err != nil {
+		return err
+	}
+
+	// 缓存 private 项目
+	if len(privatePrograms) > 0 {
+		if !e.silent {
+			fmt.Printf("[*] Bugcrowd private 项目 获取scope中...\n")
+		}
+		privateCache := e.fetchScopesAndBuildCache(privatePrograms, output)
+		e.saveCache(privateCachePath, privateCache)
+	}
+
+	if !e.silent {
+		fmt.Println("[*] Bugcrowd API 完成")
+	}
 	return nil
 }
 
@@ -168,131 +203,189 @@ func (e *FastEngine) handleAsset(identifier string, output chan<- utils.NewScope
 	}
 }
 
-// ============ 旧引擎代码（保留） ============
-
-type BugcrowdTry struct {
-	Programs []Bugcrowd     `json:"programs"`
-	Config   utils.Bugcrowd `json:"config"`
-}
-
-func NewBugcrowdTry(config utils.Bugcrowd) *BugcrowdTry {
-	return &BugcrowdTry{
-		Programs: []Bugcrowd{},
-		Config:   config,
-	}
-}
-
-func (b BugcrowdTry) ProgramJson(path string) (body []byte, err error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	url := "https://bugcrowd.com" + path
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return
-	}
-	req.Header.Set("Accept", "*/*")
-	resp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-	body, err = ioutil.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		err = fmt.Errorf(resp.Status)
-	}
-	return
-}
-
-func (b BugcrowdTry) ProgramPage(page int64) (total_page int64, page_program []Bugcrowd, err error) {
-	res_data, err := b.ProgramJson(fmt.Sprintf("/programs.json?vdp[]=false&page[]=%d", page))
-	if err != nil {
-		return
-	}
-	total_page = gjson.GetBytes(res_data, "meta.totalPages").Int()
-	program_result := gjson.GetBytes(res_data, "programs")
-	err = json.Unmarshal([]byte(program_result.Raw), &page_program)
-	return
-}
-
-func (b BugcrowdTry) Program() (programs []Bugcrowd) {
-	var new_program []Bugcrowd
-	new_bugcrowd_program := make(chan Bugcrowd)
-	semaphore := make(chan struct{}, 15)
-
-	total_page, new_program, err := b.ProgramPage(1)
-	if err != nil {
-		fmt.Println("bugcrowd 获取programs 失败", err)
-		return
-	}
-
-	var wgp sync.WaitGroup
-	wgp.Add(int(total_page) - 1)
-
-	for i := 2; i <= int(total_page); i++ {
-		go func(page int) {
-			defer wgp.Done()
-			_, program, err := b.ProgramPage(int64(page))
-			if err != nil {
-				fmt.Println("bugcrowd 获取programs 失败", err)
-			}
-			new_program = append(new_program, program...)
-		}(i)
-	}
-	wgp.Wait()
-
-	var wg sync.WaitGroup
-	for _, item := range new_program {
-		wg.Add(1)
-		item.Url = "https://bugcrowd.com" + item.ProgramUrl
-		if item.InvitedStatus != "open" || item.Participation == "private" {
-			wg.Done()
-			continue
-		}
-		go b.Scope(item, new_bugcrowd_program, semaphore, &wg)
-	}
+func (e *FastEngine) fetchAllPrograms() ([]*APIProgram, error) {
+	var allPrograms []*APIProgram
+	page := 1
 
 	for {
-		select {
-		case scope_program := <-new_bugcrowd_program:
-			programs = append(programs, scope_program)
-		case <-time.After(10 * time.Second):
-			wg.Wait()
-			return
+		url := fmt.Sprintf("https://bugcrowd.com/engagements.json?category=bug_bounty&page=%d", page)
+		cacheKey := fmt.Sprintf("bc_page_%d", page)
+		headers := map[string]string{"Accept": "application/json"}
+
+		data, _, err := e.client.GetWithCache(url, cacheKey, headers, 15*time.Minute)
+		if err != nil && len(data) == 0 {
+			break
+		}
+
+		var resp APIResponse
+		if err := json.Unmarshal(data, &resp); err != nil {
+			break
+		}
+
+		if len(resp.Engagements) == 0 {
+			break
+		}
+
+		for i := range resp.Engagements {
+			p := &resp.Engagements[i]
+			if p.IsPrivate {
+				allPrograms = append(allPrograms, p)
+			}
+		}
+
+		page++
+	}
+
+	if !e.silent {
+		fmt.Printf("[*] Bugcrowd API: private %d 个\n", len(allPrograms))
+	}
+
+	return allPrograms, nil
+}
+
+func (e *FastEngine) fetchScopesAndBuildCache(programs []*APIProgram, output chan<- utils.NewScope) []ProgramWithScope {
+	cache := make([]ProgramWithScope, 0, len(programs))
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, e.concurrency)
+
+	for _, p := range programs {
+		output <- utils.NewScope{NewPrivateURL: "https://bugcrowd.com" + p.BriefURL}
+
+		wg.Add(1)
+		go func(prog *APIProgram) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			programData := e.fetchProgramScopeWithData(&ProgramWithScope{Handle: prog.BriefURL}, output)
+			if programData != nil {
+				mu.Lock()
+				cache = append(cache, *programData)
+				mu.Unlock()
+			}
+		}(p)
+	}
+
+	wg.Wait()
+	return cache
+}
+
+func (e *FastEngine) fetchProgramScopeWithData(programData *ProgramWithScope, output chan<- utils.NewScope) *ProgramWithScope {
+	handle := programData.Handle
+	briefURL := "https://bugcrowd.com/" + handle
+
+	// 获取项目页面提取 changelog UUID
+	pageData, _, err := e.client.GetWithCache(briefURL, fmt.Sprintf("bc_page_%s", handle), map[string]string{"Accept": "text/html"}, 1*time.Hour)
+	if err != nil || len(pageData) == 0 {
+		return nil
+	}
+
+	// 从页面中提取 changelog UUID
+	changelogPattern := regexp.MustCompile(handle + `/changelog/([a-f0-9\-]+)`)
+	matches := changelogPattern.FindSubmatch(pageData)
+	if len(matches) < 2 {
+		return nil
+	}
+
+	changelogUUID := string(matches[1])
+	targetURL := fmt.Sprintf("https://bugcrowd.com/%s/changelog/%s.json", handle, changelogUUID)
+
+	data, _, err := e.client.GetWithCache(targetURL, fmt.Sprintf("bc_scope_%s", handle), map[string]string{"Accept": "application/json"}, 1*time.Hour)
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+
+	programData.URL = briefURL
+
+	// 解析 scope 数组中的 targets
+	scopeResult := gjson.GetBytes(data, "data.scope")
+	for _, scope := range scopeResult.Array() {
+		if !scope.Get("inScope").Bool() {
+			continue
+		}
+
+		targetsResult := scope.Get("targets")
+		for _, targetItem := range targetsResult.Array() {
+			target := APITarget{
+				UUID:     targetItem.Get("id").String(),
+				Name:     targetItem.Get("name").String(),
+				Category: targetItem.Get("category").String(),
+				URI:      targetItem.Get("uri").String(),
+			}
+
+			if target.Name == "" {
+				continue
+			}
+
+			programData.Targets.InScope = append(programData.Targets.InScope, target)
+
+			if utils.In(target.Category, []string{"website", "api"}) {
+				e.handleDomainIdentifier(target.Name, output)
+			} else {
+				if strings.HasPrefix(target.Name, "*") || strings.HasSuffix(target.Name, "*") {
+					e.handleDomainIdentifier(target.Name, output)
+				} else {
+					e.handleAsset(target.Name, output)
+				}
+			}
+		}
+	}
+
+	if programData.Targets.InScope == nil {
+		return nil
+	}
+
+	return programData
+}
+
+func (e *FastEngine) loadCache(path string, maxAge time.Duration) ([]ProgramWithScope, bool) {
+	if info, err := os.Stat(path); err == nil {
+		if time.Since(info.ModTime()) < maxAge {
+			data, err := ioutil.ReadFile(path)
+			if err != nil {
+				return nil, false
+			}
+
+			var programs []ProgramWithScope
+			if err := json.Unmarshal(data, &programs); err != nil {
+				return nil, false
+			}
+
+			return programs, true
+		}
+	}
+
+	return nil, false
+}
+
+func (e *FastEngine) saveCache(path string, cache interface{}) {
+	data, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		return
+	}
+	ioutil.WriteFile(path, data, 0644)
+}
+
+func (e *FastEngine) outputFromCache(cache []ProgramWithScope, output chan<- utils.NewScope) {
+	for _, p := range cache {
+		output <- utils.NewScope{NewPrivateURL: p.URL}
+
+		for _, target := range p.Targets.InScope {
+			if utils.In(target.Category, []string{"website", "api"}) {
+				e.handleDomainIdentifier(target.URI, output)
+			} else {
+				e.handleAsset(target.URI, output)
+			}
 		}
 	}
 }
 
-func (b BugcrowdTry) Target(url string) (scope []BugcrowdScope, err error) {
-	res_data, err := b.ProgramJson(url)
-	if err != nil {
-		return
-	}
-	result := gjson.GetBytes(res_data, "targets")
-	if result.Raw == "" {
-		return
-	}
-	err = json.Unmarshal([]byte(result.Raw), &scope)
-	return
-}
+func (e *FastEngine) matchHandle(handle string) string {
+	url := strings.TrimPrefix(handle, "https://")
+	url = strings.TrimPrefix(url, "http://")
+	url = strings.TrimPrefix(url, "bugcrowd.com/engagements/")
 
-func (b BugcrowdTry) Scope(bugcrowd Bugcrowd, new_bugcrowd_program chan Bugcrowd, semaphore chan struct{}, wg *sync.WaitGroup) (in_scopes []BugcrowdScope, out_scopes []BugcrowdScope) {
-	defer wg.Done()
-	semaphore <- struct{}{}
-
-	target_data, err := b.ProgramJson(bugcrowd.ProgramUrl + "/target_groups")
-	if err != nil {
-		fmt.Println("bugcrowd 获取target_groups 失败", err)
-		<-semaphore
-		new_bugcrowd_program <- bugcrowd
-		return
-	}
-
-	in_result := gjson.GetBytes(target_data, "groups.#(in_scope==true)#.targets_url")
-	for _, item := range in_result.Array() {
-		new_in_scopes, _ := b.Target(item.Str)
-		in_scopes = append(in_scopes, new_in_scopes...)
-	}
-	bugcrowd.Targets.InScope = in_scopes
-	<-semaphore
-	new_bugcrowd_program <- bugcrowd
-	return
+	return strings.Split(url, "/")[0]
 }

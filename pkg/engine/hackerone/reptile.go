@@ -3,8 +3,8 @@ package hackerone
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -23,12 +23,11 @@ type FastEngine struct {
 	client      *utils.HttpClient
 	concurrency int
 	// cache
-	githubCacheCount  int
+	githubCacheCount int
 }
 
-
 // NewFastEngine 创建快速引擎
-func NewFastEngine(cacheDir string, config utils.HackerOne,handle string, silent bool) *FastEngine {
+func NewFastEngine(cacheDir string, config utils.HackerOne, handle string, silent bool) *FastEngine {
 	ratePerMinute := 400
 	concurrency := 50
 	if !config.Private.Enable {
@@ -45,7 +44,7 @@ func NewFastEngine(cacheDir string, config utils.HackerOne,handle string, silent
 
 	return &FastEngine{
 		cacheDir:    cacheDir,
-		handle:		 handle,
+		handle:      handle,
 		config:      config,
 		silent:      silent,
 		client:      client,
@@ -57,19 +56,10 @@ func NewFastEngine(cacheDir string, config utils.HackerOne,handle string, silent
 func (e *FastEngine) Run(output chan<- utils.NewScope) error {
 
 	if e.handle != "" {
-		handle_list, err  := utils.ReadFileToList(e.handle)
-		// 判断是否是列表文件
-		if err != nil{
-			program := &ProgramWithScope{Handle:e.matchHandle(e.handle)}
-			
-			e.fetchProgramScopeWithData(program, output)
-		}else{
-			for _,handle := range handle_list{
-				program := &ProgramWithScope{Handle:e.matchHandle(handle)}
-				e.fetchProgramScopeWithData(program, output)
-			}
-		}
-		
+		program := &ProgramWithScope{Handle: e.matchHandle(e.handle)}
+
+		e.fetchProgramScopeWithData(program, output)
+
 		return nil
 	}
 
@@ -111,7 +101,7 @@ func (e *FastEngine) RunGithubPublic(output chan<- utils.NewScope) error {
 			continue
 		}
 
-		new_programs = append(new_programs,p)
+		new_programs = append(new_programs, p)
 
 		for _, target := range p.Targets.InScope {
 			if utils.In(target.AssetType, []string{"DOMAIN", "URL", "WILDCARD"}) {
@@ -141,7 +131,7 @@ func (e *FastEngine) RunGithubPublic(output chan<- utils.NewScope) error {
 
 // Public + Private 获公共+私有项目（从API）
 func (e *FastEngine) RunAPI(output chan<- utils.NewScope) error {
-	
+
 	if !e.config.Private.Enable {
 		return nil
 	}
@@ -192,7 +182,6 @@ func (e *FastEngine) RunAPI(output chan<- utils.NewScope) error {
 	}
 	return nil
 }
-
 
 func (e *FastEngine) fetchAllPrograms() (publicPrograms, privatePrograms []*APIProgram, err error) {
 	var pageCount int
@@ -287,7 +276,7 @@ func (e *FastEngine) fetchProgramScopeWithData(programData *ProgramWithScope, ou
 		return nil
 	}
 
-	programData.URL =  "https://hackerone.com/" + handle
+	programData.URL = "https://hackerone.com/" + handle
 
 	for _, asset := range scope.Data {
 		if !asset.Attributes.EligibleForBounty {
@@ -295,10 +284,10 @@ func (e *FastEngine) fetchProgramScopeWithData(programData *ProgramWithScope, ou
 		}
 
 		target := asset.Attributes
-		
+
 		programData.Targets.InScope = append(programData.Targets.InScope, target)
 
-		if utils.In(target.AssetType, []string{"DOMAIN", "URL", "WILDCARD"}){
+		if utils.In(target.AssetType, []string{"DOMAIN", "URL", "WILDCARD"}) {
 			e.handleDomainIdentifier(target.AssetIdentifier, output)
 		} else if target.AssetType == "OTHER" {
 			if strings.HasPrefix(target.AssetIdentifier, "*") || strings.HasSuffix(target.AssetIdentifier, "*") {
@@ -308,7 +297,7 @@ func (e *FastEngine) fetchProgramScopeWithData(programData *ProgramWithScope, ou
 			}
 		} else {
 			e.handleAsset(target.AssetIdentifier, output)
-		} 
+		}
 	}
 	if programData.Targets.InScope == nil {
 		return nil
@@ -353,7 +342,7 @@ func (e *FastEngine) handleAsset(identifier string, output chan<- utils.NewScope
 }
 
 func (e *FastEngine) loadCache(path string, maxAge time.Duration) ([]ProgramWithScope, bool) {
-	
+
 	if info, err := os.Stat(path); err == nil {
 		if time.Since(info.ModTime()) < maxAge {
 			data, err := ioutil.ReadFile(path)
@@ -363,14 +352,14 @@ func (e *FastEngine) loadCache(path string, maxAge time.Duration) ([]ProgramWith
 
 			var programs []ProgramWithScope
 			if err := json.Unmarshal(data, &programs); err != nil {
-				return nil , false
+				return nil, false
 			}
 
 			return programs, true
 		}
 	}
 
-	return nil , false
+	return nil, false
 
 }
 
@@ -381,7 +370,6 @@ func (e *FastEngine) saveCache(path string, cache interface{}) {
 	}
 	ioutil.WriteFile(path, data, 0644)
 }
-
 
 func (e *FastEngine) outputFromCache(cache []ProgramWithScope, output chan<- utils.NewScope) {
 	for _, p := range cache {
@@ -402,8 +390,7 @@ func (e *FastEngine) matchHandle(handle string) string {
 	url := strings.TrimPrefix(handle, "https://")
 	url = strings.TrimPrefix(url, "http://")
 	url = strings.TrimPrefix(url, "hackerone.com/")
-	
+
 	// 返回第一个路径段
 	return strings.Split(url, "/")[0]
 }
-	
